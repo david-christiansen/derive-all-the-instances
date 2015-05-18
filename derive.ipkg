@@ -1,0 +1,8 @@
+package derive
+
+-- Derive All The Instances!
+-- by David Raymond Christiansen
+
+opts = ""
+sourcedir = src
+modules = Derive.Disjoint, Derive.Kit
