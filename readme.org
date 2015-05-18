@@ -4,3 +4,6 @@ This is my playground for exploring type class deriving using Idris
 elaborator reflection.
 
 More to come.
+
+This code requires *at least* Idris 0.9.18, and probably some newer
+Git version. You've been warned.
