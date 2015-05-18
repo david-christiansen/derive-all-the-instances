@@ -72,3 +72,10 @@ mkApp : Raw -> List Raw -> Raw
 mkApp f [] = f
 mkApp f (x :: xs) = mkApp (RApp f x) xs
 
+mkPairTy : Raw -> Raw -> Raw
+mkPairTy a b = `((~a, ~b) : Type)
+
+rebind : List (TTName, Binder Raw) -> Raw -> Raw
+rebind [] tm = tm
+rebind ((n, b) :: nbs) tm = RBind n b $ rebind nbs tm
+
