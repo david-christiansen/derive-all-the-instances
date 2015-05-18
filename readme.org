@@ -1,0 +1,6 @@
+* DERIVE ALL THE INSTANCES
+
+This is my playground for exploring type class deriving using Idris
+elaborator reflection.
+
+More to come.
