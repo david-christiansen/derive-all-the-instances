@@ -79,3 +79,56 @@ rebind : List (TTName, Binder Raw) -> Raw -> Raw
 rebind [] tm = tm
 rebind ((n, b) :: nbs) tm = RBind n b $ rebind nbs tm
 
+
+namespace Tactics
+  newHole : String -> Raw -> Elab TTName
+  newHole hint ty = do hn <- gensym hint
+                       claim hn ty
+                       unfocus hn
+                       return hn
+
+  ||| A tactic for dispatching trivial goals, along with conjunctions
+  ||| and disjunctions of these.
+  partial
+  trivial : Elab ()
+  trivial = do compute
+               g <- snd <$> getGoal
+               case !(forgetTypes g) of
+                 `((=) {A=~A} {B=~_} ~x ~_) =>
+                     do apply [| (Var `{Refl}) A x |]
+                        solve
+                 `(() : Type) =>
+                     do apply `(() : ())
+                        solve
+                 `(Pair ~t1 ~t2) =>
+                     do fstH <- newHole "fst" t1
+                        sndH <- newHole "snd" t2
+                        apply `(MkPair {A=~t1} {B=~t2} ~(Var fstH) ~(Var sndH))
+                        solve
+                        focus fstH; trivial
+                        focus sndH; trivial
+                 `(Either ~a ~b) =>
+                    (do lft <- newHole "left" a
+                        apply `(Left {a=~a} {b=~b} ~(Var lft))
+                        solve
+                        focus lft; trivial) <|>
+                    (do rght <- newHole "right" b
+                        apply `(Right {a=~a} {b=~b} ~(Var rght))
+                        solve
+                        focus rght; trivial)
+                 _ =>
+                     fail [TermPart g, TextPart "is not trivial"]
+  partial
+  repeatUntilFail : Elab () -> Elab ()
+  repeatUntilFail tac = do tac
+                           (repeatUntilFail tac <|> return ())
+
+  bindPat : Elab ()
+  bindPat = do compute
+               g <- snd <$> getGoal
+               case g of
+                 Bind n (PVTy _) _ => patbind n
+                 _ => fail [TermPart g, TextPart "isn't looking for a pattern."]
+
+testTriv : ((), (), (), (Either Void ()))
+testTriv = %runElab trivial
