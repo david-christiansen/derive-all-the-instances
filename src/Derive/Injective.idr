@@ -55,13 +55,6 @@ mkInjectiveTy fn mkGoal (cn, cty) =
      let retTy = mkGoal args1 args2
      return $ Declare fn (map (\(n, b) => Implicit n (getBinderTy b)) (args1 ++ args2) ++ [Explicit hypN hypTy]) retTy
 
-bindPats : List (TTName, Binder Raw) -> Raw -> Raw
-bindPats [] res = res
-bindPats ((n, b)::bs) res = RBind n (PVar (getBinderTy b)) $ bindPats bs res
-
-bindPatTys : List (TTName, Binder Raw) -> Raw -> Raw
-bindPatTys [] res = res
-bindPatTys ((n, b)::bs) res = RBind n (PVTy (getBinderTy b)) $ bindPatTys bs res
 
 
 partial

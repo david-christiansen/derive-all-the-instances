@@ -77,7 +77,7 @@ mkDisjoint tyn' =
 
 
 
-data Tree = Empty | Branch Tree Tree | Thing Nat
+-- data Tree = Empty | Branch Tree Tree | Thing Nat
 
-forSideEffect : ()
-forSideEffect = %runElab (mkDisjoint `{Tree} *> fill `(():()) *> solve)
+-- forSideEffect : ()
+-- forSideEffect = %runElab (mkDisjoint `{Tree} *> fill `(():()) *> solve)

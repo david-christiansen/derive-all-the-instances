@@ -79,6 +79,14 @@ rebind : List (TTName, Binder Raw) -> Raw -> Raw
 rebind [] tm = tm
 rebind ((n, b) :: nbs) tm = RBind n b $ rebind nbs tm
 
+bindPats : List (TTName, Binder Raw) -> Raw -> Raw
+bindPats [] res = res
+bindPats ((n, b)::bs) res = RBind n (PVar (getBinderTy b)) $ bindPats bs res
+
+bindPatTys : List (TTName, Binder Raw) -> Raw -> Raw
+bindPatTys [] res = res
+bindPatTys ((n, b)::bs) res = RBind n (PVTy (getBinderTy b)) $ bindPatTys bs res
+
 
 namespace Tactics
   newHole : String -> Raw -> Elab TTName
