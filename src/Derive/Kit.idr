@@ -5,8 +5,8 @@ import Language.Reflection.Utils
 
 %default total
 
-||| Generate a name that looks like some previous name, for ease of
-||| debugging code generators.
+||| Generate a unique name (using `gensym`) that looks like some
+||| previous name, for ease of debugging code generators.
 nameFrom : TTName -> Elab TTName
 nameFrom (UN x) = gensym $ if length x == 0 || ("_" `isPrefixOf` x)
                              then "x"
@@ -26,6 +26,9 @@ namespace Renamers
   ||| Extend a renamer with a new renaming
   extend : (TTName -> Maybe TTName) -> TTName -> TTName -> (TTName -> Maybe TTName)
   extend f n n' n'' = if n'' == n then Just n' else f n''
+
+  rename : TTName -> TTName -> TTName -> Maybe TTName
+  rename from to = extend (const Nothing) from to
 
 ||| Alpha-convert `Raw` terms
 ||| @ subst a partial name substitution function
@@ -87,6 +90,18 @@ bindPatTys : List (TTName, Binder Raw) -> Raw -> Raw
 bindPatTys [] res = res
 bindPatTys ((n, b)::bs) res = RBind n (PVTy (getBinderTy b)) $ bindPatTys bs res
 
+
+tyConArgName : TyConArg -> TTName
+tyConArgName (Parameter n _) = n
+tyConArgName (Index n _) = n
+
+setTyConArgName : TyConArg -> TTName -> TyConArg
+setTyConArgName (Parameter _ t) n = Parameter n t
+setTyConArgName (Index _ t) n = Index n t
+
+updateTyConArgTy : (Raw -> Raw) -> TyConArg -> TyConArg
+updateTyConArgTy f (Parameter n t) = Parameter n (f t)
+updateTyConArgTy f (Index n t) = Index n (f t)
 
 namespace Tactics
   newHole : String -> Raw -> Elab TTName
