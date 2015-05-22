@@ -1,9 +1,15 @@
 module Derive.Kit
 
+import Data.Vect
+
 import Language.Reflection.Elab
 import Language.Reflection.Utils
 
 %default total
+
+doTimes : Applicative m => (n : Nat) -> m a -> m (Vect n a)
+doTimes Z x = pure []
+doTimes (S k) x = [| x :: (doTimes k x) |]
 
 ||| Generate a unique name (using `gensym`) that looks like some
 ||| previous name, for ease of debugging code generators.
@@ -17,6 +23,14 @@ nameFrom (MN x n) = gensym $ if length n == 0 || ("_" `isPrefixOf` n)
                                else n
 nameFrom (SN x) = gensym "SN"
 nameFrom NErased = gensym "wasErased"
+
+||| Generate holes suitable as arguments to a term of some type
+argHoles : Raw -> Elab (List TTName)
+argHoles (RBind n (Pi t _) body) = do n' <- nameFrom n
+                                      claim n t
+                                      unfocus n
+                                      (n ::) <$> argHoles body
+argHoles _ = return []
 
 namespace Renamers
   ||| Cause a renamer to forget a renaming

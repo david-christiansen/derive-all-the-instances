@@ -128,12 +128,11 @@ removeParams info ctorTy =
 
 ||| Apply the motive for elimination to some subject, inferring the
 ||| values of the indices from the type of the subject.
-applyMotive : TyConInfo -> (motiveName : TTName) -> (arg, argTy : Raw) -> Elab ()
-applyMotive info motiveName arg argTy =
-  let app = mkApp (Var motiveName) $
-              map snd (filter (isIndex . fst) (zip' (args info) (snd (unApply argTy)))) ++
-              [arg]
-  in apply app *> solve
+applyMotive : TyConInfo -> (motive : Raw) -> (arg, argTy : Raw) -> Raw
+applyMotive info motive arg argTy =
+  mkApp motive $
+        map snd (filter (isIndex . fst) (zip' (args info) (snd (unApply argTy)))) ++
+        [arg]
   where zip' : List a -> List b -> List (a, b)
         zip' [] _ = []
         zip' _ [] = []
@@ -155,7 +154,8 @@ headsMatch x y =
 
 elabMethodTy : TyConInfo -> TTName -> List (Either TTName (TTName, Raw)) -> Raw -> Raw -> Elab ()
 elabMethodTy info motiveName [] res ctorApp =
-  applyMotive info motiveName ctorApp res
+  do apply $ applyMotive info (Var motiveName) ctorApp res
+     solve
 elabMethodTy info motiveName (Left paramN  :: args) res ctorApp =
   elabMethodTy info motiveName args  res (RApp ctorApp (Var paramN))
 elabMethodTy info motiveName (Right (n, t) :: args) res ctorApp =
@@ -166,7 +166,8 @@ elabMethodTy info motiveName (Right (n, t) :: args) res ctorApp =
                ihT <- newHole "ihT" `(Type)
                forall ih (Var ihT)
                focus ihT
-               applyMotive info motiveName (Var arg) t
+               apply $ applyMotive info (Var motiveName) (Var arg) t
+               solve
                focus arg
                apply (Var n); solve
        else return ()
@@ -190,10 +191,9 @@ bindMethod info motiveName cn cty =
      forall n (Var h)
      focus h; elabMethod info motiveName cn cty
 
-getElimTy : Datatype -> Elab Raw
-getElimTy (MkDatatype tyn tyconArgs tyconRes constrs) =
-  do info <- getTyConInfo tyconArgs (Var tyn)
-     ty <- runElab `(Type) $
+getElimTy : TyConInfo -> List (TTName, Raw) -> Elab Raw
+getElimTy info ctors =
+  do ty <- runElab `(Type) $
              do bindParams info
                 (scrut, iren) <- bindTarget info
                 motiveN <- gensym "P"
@@ -201,19 +201,100 @@ getElimTy (MkDatatype tyn tyconArgs tyconRes constrs) =
                 forall motiveN (Var motiveH)
                 focus motiveH
                 elabMotive info
-                traverse_ (uncurry (bindMethod info motiveN)) constrs
-                let ret = mkApp (Var motiveN) (map (Var . fst) (getIndices info) ++ [Var scrut])
+                traverse_ (uncurry (bindMethod info motiveN)) ctors
+                let ret = mkApp (Var motiveN)
+                                (map (Var . fst)
+                                     (getIndices info) ++
+                                 [Var scrut])
                 apply (alphaRaw iren ret)
                 solve
      forgetTypes (fst ty)
+
+getSigmaArgs : Raw -> Elab (Raw, Raw)
+getSigmaArgs `(MkSigma {a=~_} {P=~_} ~rhsTy ~lhs) = return (rhsTy, lhs)
+getSigmaArgs arg = fail [TextPart "Not a sigma constructor"]
+
+getElimClause : TyConInfo -> (elimn : TTName) -> (methCount : Nat) ->
+                (TTName, Raw) -> Elab FunClause
+getElimClause info elimn methCount (cn, cty) =
+  do (args, resTy) <- removeParams info cty
+     pat <- runElab `(Sigma Type id) $
+              do -- First set up the machinery to infer the type of the LHS
+                 th <- newHole "finalTy" `(Type)
+                 patH <- newHole "pattern" (Var th)
+                 fill `(MkSigma {a=Type} {P=id} ~(Var th) ~(Var patH))
+                 solve
+                 focus patH
+
+                 -- Establish a hole for each parameter
+                 traverse {b=()} (\(n, ty) => do claim n ty
+                                                 unfocus n)
+                          (getParams info)
+
+                 -- Establish holes for the indices, and put them in
+                 -- holes.  These aren't the pattern variables - we
+                 -- establish the relationship between patvar n and
+                 -- index hole ix using unification later
+                 ixs <- traverse {b=TTName} (\(n, ty) => do claim n ty
+                                                            unfocus n
+                                                            newHole "ix" ty)
+                                  (getIndices info)
+
+                 -- Establish a hole for each argument to the constructor
+                 traverse {b=()} (\arg => case arg of
+                                            Left _ => return ()
+                                            Right (n, ty) => do claim n ty
+                                                                unfocus n)
+                   args
+
+                 -- Establish a hole for the scrutinee (infer type)
+                 scrutinee <- newHole "scrutinee" resTy
+
+                 -- Apply the eliminator to the proper holes
+                 let paramApp : Raw = mkApp (Var elimn) $
+                                      map (Var . fst) (getParams info)
+                 let indexApp : Raw =
+                       applyMotive info paramApp (Var scrutinee) resTy
+
+                 todo <- snd <$> check indexApp
+                 args <- argHoles !(forgetTypes todo)
+                 let elimApp = mkApp indexApp (map Var args)
+                 apply elimApp
+                 solve
+
+                 -- Turn all remaining holes into pattern variables
+                 -- traverse {b=()} (\(h, t) => do focus h ; patvar h)
+                 --          (getParams info)
+                 traverse {b=()} (\h => do focus h ; patvar h) !getHoles
+                 return ()
+
+     (pvars, sigma) <- stealBindings !(forgetTypes (fst pat)) (const Nothing)
+     (rhsTy, lhs) <- getSigmaArgs sigma
+     rhs <- runElab (bindPatTys pvars rhsTy) $
+              do repeatUntilFail bindPat
+                 -- CONTINUE HERE
+                 debug
+     debugMessage (show rhsTy)
+
+
+getElimClauses : TyConInfo -> (elimn : TTName) ->
+                 List (TTName, Raw) -> Elab (List FunClause)
+getElimClauses info elimn ctors =
+  let methodCount = length ctors
+  in traverse (getElimClause info elimn methodCount) ctors
 
 deriveElim : (tyn, elimn : TTName) -> Elab ()
 deriveElim tyn elimn =
   do -- Begin with some basic sanity checking
      -- 1. The type name uniquely determines a datatype
-     datatype <- lookupDatatypeExact tyn
-     declareType $ Declare elimn [] !(getElimTy datatype)
+     (MkDatatype tyn tyconArgs tyconRes ctors) <- lookupDatatypeExact tyn
+     info <- getTyConInfo tyconArgs (Var tyn)
+     declareType $ Declare elimn [] !(getElimTy info ctors)
+     clauses <- getElimClauses info elimn (reverse ctors)
      return ()
 
 forEffect : ()
 forEffect = %runElab (deriveElim `{Vect} (NS (UN "vectElim") ["Elim", "Derive"]) *> trivial)
+
+-- vectElim a Z Nil P nil cons = nil
+-- vectElim a (S n) ((::) {a=a} {n=n} x xs) P nil cons = cons n x xs (vectElim a n xs P nil cons)
