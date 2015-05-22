@@ -11,7 +11,7 @@ nameFrom : TTName -> Elab TTName
 nameFrom (UN x) = gensym $ if length x == 0 || ("_" `isPrefixOf` x)
                              then "x"
                              else x
-nameFrom (NS n ns) = flip NS ns <$> nameFrom n
+nameFrom (NS n ns) = nameFrom n -- throw out namespaces here, because we want to generate bound var names
 nameFrom (MN x n) = gensym $ if length n == 0 || ("_" `isPrefixOf` n)
                                then "n"
                                else n
@@ -74,6 +74,12 @@ mkDecl fn xs tm = Declare fn (map (\(n, b) => Implicit n (getBinderTy b)) xs) tm
 mkApp : Raw -> List Raw -> Raw
 mkApp f [] = f
 mkApp f (x :: xs) = mkApp (RApp f x) xs
+
+unApply : Raw -> (Raw, List Raw)
+unApply tm = unApply' tm []
+  where unApply' : Raw -> List Raw -> (Raw, List Raw)
+        unApply' (RApp f x) xs = unApply' f (x::xs)
+        unApply' notApp xs = (notApp, xs)
 
 mkPairTy : Raw -> Raw -> Raw
 mkPairTy a b = `((~a, ~b) : Type)
@@ -152,6 +158,12 @@ namespace Tactics
                case g of
                  Bind n (PVTy _) _ => patbind n
                  _ => fail [TermPart g, TextPart "isn't looking for a pattern."]
+
+
+--TODO: move to prelude
+instance (Show a, Show b) => Show (Either a b) where
+  show (Left x) = "(Left " ++ show x ++ ")"
+  show (Right x) = "(Right " ++ show x ++ ")"
 
 testTriv : ((), (), (), (Either Void ()))
 testTriv = %runElab trivial

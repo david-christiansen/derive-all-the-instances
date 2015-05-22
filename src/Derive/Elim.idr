@@ -1,6 +1,7 @@
 module Derive.Elim
 
 import Data.Vect
+import Data.So
 
 import Derive.Kit
 import Language.Reflection.Elab
@@ -27,7 +28,6 @@ getIndices info = mapMaybe index (args info)
   where index : TyConArg -> Maybe (TTName, Raw)
         index (Index n t) = Just (n, t)
         index _ = Nothing
-
 
 ||| Rename a bound variable across a telescope
 renameIn : (from, to : TTName) -> List (TTName, Raw) -> List (TTName, Raw)
@@ -86,9 +86,109 @@ elabMotive info = do attack
                      ren <- bindIndices info
                      x <- gensym "scrutinee"
                      forall x (alphaRaw ren $ result info)
-                     fill `(Type)
+                     apply `(Type)
                      solve -- the attack
                      solve -- the motive type hole
+
+||| Point ctor arguments that are parameters at the global param
+||| quantification.
+|||
+||| We keep the other arguments, such as indices, but assign them
+||| unique names so we don't have to worry about shadowing later.
+removeParams : TyConInfo -> Raw -> Elab (List (Either TTName (TTName, Raw)), Raw)
+removeParams info ctorTy =
+  do (args, res) <- stealBindings ctorTy (const Nothing)
+     return $ killParams (map (\(n, b) => (n, getBinderTy b)) args)
+                         res
+  where isParamName : TTName -> Maybe TTName
+        isParamName name = if elem name (map fst $ getParams info)
+                             then Just name
+                             else Nothing
+
+        isParamIn : (argn : TTName) -> (resty : Raw) -> (infoTy : Raw) -> Maybe TTName
+        isParamIn argn (RApp f (Var x)) (RApp g (Var y)) =
+          if argn == x
+            then isParamName y
+            else isParamIn argn f g
+        isParamIn argn (RApp f _) (RApp g _) = isParamIn argn f g
+        isParamIn _ (Var _) (Var _) = Nothing
+        isParamIn argn resty infoTy = Nothing -- shouldn't happen - TODO fail ["error checking param name"]
+
+        killParams : List (TTName, Raw) -> Raw -> (List (Either TTName (TTName, Raw)), Raw)
+        killParams [] res = ([], res)
+        killParams ((n,t)::args) res =
+          let (args', res') = killParams args res
+          in case isParamIn n res' (result info) of
+               Just glob => (Left glob :: map (renIndex n glob) args',
+                             alphaRaw (rename n glob) res')
+               Nothing => (Right (n, t) :: args', res')
+          where renIndex : TTName -> TTName -> Either TTName (TTName, Raw) -> Either TTName (TTName, Raw)
+                renIndex n glob (Right (n', t)) = Right (n', alphaRaw (rename n glob) t)
+                renIndex _ _ (Left p) = Left p
+
+||| Apply the motive for elimination to some subject, inferring the
+||| values of the indices from the type of the subject.
+applyMotive : TyConInfo -> (motiveName : TTName) -> (arg, argTy : Raw) -> Elab ()
+applyMotive info motiveName arg argTy =
+  let app = mkApp (Var motiveName) $
+              map snd (filter (isIndex . fst) (zip' (args info) (snd (unApply argTy)))) ++
+              [arg]
+  in apply app *> solve
+  where zip' : List a -> List b -> List (a, b)
+        zip' [] _ = []
+        zip' _ [] = []
+        zip' (x::xs) (y::ys) = (x, y) :: zip' xs ys
+        isIndex : TyConArg -> Bool
+        isIndex (Index _ _) = True
+        isIndex _ = False
+
+headVar : Raw -> Maybe TTName
+headVar (RApp f _) = headVar f
+headVar (Var n) = Just n
+headVar x = Nothing
+
+headsMatch : Raw -> Raw -> Bool
+headsMatch x y =
+  case (headVar x, headVar y) of
+    (Just n1, Just n2) => n1 == n2
+    _ => False
+
+elabMethodTy : TyConInfo -> TTName -> List (Either TTName (TTName, Raw)) -> Raw -> Raw -> Elab ()
+elabMethodTy info motiveName [] res ctorApp =
+  applyMotive info motiveName ctorApp res
+elabMethodTy info motiveName (Left paramN  :: args) res ctorApp =
+  elabMethodTy info motiveName args  res (RApp ctorApp (Var paramN))
+elabMethodTy info motiveName (Right (n, t) :: args) res ctorApp =
+  do attack; forall n t
+     if headsMatch t (result info)
+       then do arg <- newHole "arg" t
+               ih <- gensym "ih"
+               ihT <- newHole "ihT" `(Type)
+               forall ih (Var ihT)
+               focus ihT
+               applyMotive info motiveName (Var arg) t
+               focus arg
+               apply (Var n); solve
+       else return ()
+     elabMethodTy info motiveName args res (RApp ctorApp (Var n))
+     solve
+
+
+
+
+elabMethod : TyConInfo -> (motiveName, ctorN : TTName) -> Raw -> Elab ()
+elabMethod info motiveName ctorN cty =
+  do (args', resTy) <- removeParams info cty
+     elabMethodTy info motiveName args' resTy (Var ctorN)
+
+
+||| Bind a method for a constructor
+bindMethod : TyConInfo -> (motiveName, cn : TTName) -> Raw -> Elab ()
+bindMethod info motiveName cn cty =
+  do n <- nameFrom cn
+     h <- newHole "methTy" `(Type)
+     forall n (Var h)
+     focus h; elabMethod info motiveName cn cty
 
 getElimTy : Datatype -> Elab Raw
 getElimTy (MkDatatype tyn tyconArgs tyconRes constrs) =
@@ -101,9 +201,9 @@ getElimTy (MkDatatype tyn tyconArgs tyconRes constrs) =
                 forall motiveN (Var motiveH)
                 focus motiveH
                 elabMotive info
-                -- TODO methods
+                traverse_ (uncurry (bindMethod info motiveN)) constrs
                 let ret = mkApp (Var motiveN) (map (Var . fst) (getIndices info) ++ [Var scrut])
-                fill (alphaRaw iren ret)
+                apply (alphaRaw iren ret)
                 solve
      forgetTypes (fst ty)
 
