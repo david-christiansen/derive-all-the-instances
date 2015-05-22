@@ -1,9 +1,15 @@
 module Derive.Kit
 
+import Data.Vect
+
 import Language.Reflection.Elab
 import Language.Reflection.Utils
 
 %default total
+
+doTimes : Applicative m => (n : Nat) -> m a -> m (Vect n a)
+doTimes Z x = pure []
+doTimes (S k) x = [| x :: (doTimes k x) |]
 
 ||| Generate a unique name (using `gensym`) that looks like some
 ||| previous name, for ease of debugging code generators.
@@ -17,6 +23,21 @@ nameFrom (MN x n) = gensym $ if length n == 0 || ("_" `isPrefixOf` n)
                                else n
 nameFrom (SN x) = gensym "SN"
 nameFrom NErased = gensym "wasErased"
+
+||| Generate holes suitable as arguments to a term of some type
+argHoles : Raw -> Elab (List TTName)
+argHoles (RBind n (Pi t _) body) = do n' <- nameFrom n
+                                      claim n t
+                                      unfocus n
+                                      (n ::) <$> argHoles body
+argHoles _ = return []
+
+enumerate : List a -> List (Nat, a)
+enumerate xs = enumerate' xs 0
+  where enumerate' : List a -> Nat -> List (Nat, a)
+        enumerate' [] _ = []
+        enumerate' (x::xs) n = (n, x) :: enumerate' xs (S n)
+
 
 namespace Renamers
   ||| Cause a renamer to forget a renaming
@@ -159,6 +180,24 @@ namespace Tactics
                  Bind n (PVTy _) _ => patbind n
                  _ => fail [TermPart g, TextPart "isn't looking for a pattern."]
 
+  intro1 : Elab TTName
+  intro1 = do g <- snd <$> getGoal
+              case g of
+                Bind n (Pi _ _) _ => do n' <- nameFrom n
+                                        intro (Just n')
+                                        return n'
+                _ => fail [ TextPart "Can't intro1 because goal"
+                          , TermPart g
+                          , TextPart "isn't a function type."]
+
+  intros : Elab (List TTName)
+  intros = do g <- snd <$> getGoal
+              go g
+    where go : TT -> Elab (List TTName)
+          go (Bind n (Pi _ _) body) = do n' <- nameFrom n
+                                         intro (Just n')
+                                         (n' ::) <$> go body
+          go _ = return []
 
 --TODO: move to prelude
 instance (Show a, Show b) => Show (Either a b) where
