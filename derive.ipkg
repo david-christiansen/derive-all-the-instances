@@ -5,4 +5,4 @@ package derive
 
 opts = ""
 sourcedir = src
-modules = Derive.Disjoint, Derive.Kit
+modules = Derive.Disjoint, Derive.Kit, Derive.Injective, Derive.Elim
