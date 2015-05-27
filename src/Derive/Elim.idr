@@ -242,6 +242,7 @@ getElimClause info elimn methCount (cn, cty) whichCon =
                  -- Establish a hole for the scrutinee (infer type)
                  scrutinee <- newHole "scrutinee" resTy
 
+
                  -- Apply the eliminator to the proper holes
                  let paramApp : Raw = mkApp (Var elimn) $
                                       map (Var . fst) (getParams info)
@@ -251,6 +252,14 @@ getElimClause info elimn methCount (cn, cty) whichCon =
                  -- We leave the RHS with a function type: motive -> method* -> res
                  -- to make it easier to map methods to constructors
                  apply indexApp
+                 solve
+                 
+                 -- Fill the scrutinee with the concrete constructor pattern
+                 focus scrutinee
+                 apply $ mkApp (Var cn) $ map (\x => case x of
+                                                       Left pn => Var pn
+                                                       Right (n,_) => Var n)
+                                              args
                  solve
 
                  -- Turn all remaining holes into pattern variables
@@ -272,7 +281,7 @@ getElimClause info elimn methCount (cn, cty) whichCon =
                  apply (Var methN) ; solve
      realRhs <- forgetTypes (fst rhs)
      return $ MkFunClause (bindPats pvars lhs) realRhs
---     debugMessage (show lhs)
+--     debugMessage (show $ bindPats pvars lhs)
 
 getElimClauses : TyConInfo -> (elimn : TTName) ->
                  List (TTName, Raw) -> Elab (List FunClause)
