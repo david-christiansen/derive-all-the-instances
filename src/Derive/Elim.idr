@@ -223,6 +223,7 @@ getElimClause : TyConInfo -> (elimn : TTName) -> (methCount : Nat) ->
                 (TTName, Raw) -> Nat -> Elab FunClause
 getElimClause info elimn methCount (cn, cty) whichCon =
   do (args, resTy) <- removeParams info cty
+
      pat <- runElab `(Sigma Type id) $
               do -- First set up the machinery to infer the type of the LHS
                  th <- newHole "finalTy" `(Type)
@@ -270,12 +271,13 @@ getElimClause info elimn methCount (cn, cty) whichCon =
                  -- traverse {b=()} (\(h, t) => do focus h ; patvar h)
                  --          (getParams info)
                  traverse {b=()} (\h => do focus h ; patvar h) !getHoles
+
                  return ()
 
      let (pvars, sigma) = extractBinders !(forgetTypes (fst pat))
      (rhsTy, lhs) <- getSigmaArgs sigma
      rhs <- runElab (bindPatTys pvars rhsTy) $
-              do repeatUntilFail bindPat
+              do (repeatUntilFail bindPat <|> return ())
                  motiveN <- gensym "motive"
                  intro (Just motiveN)
                  prevMethods <- doTimes whichCon intro1
@@ -333,19 +335,6 @@ deriveElim tyn elimn =
      defineFunction $ DefineFun elimn clauses
      return ()
 
-||| A strict less-than relation on `Nat`.
-|||
-||| @ n the smaller number
-||| @ m the larger number
-data LT' : (n,m : Nat) -> Type where
-  ||| n < 1 + n
-  LTSucc : LT' n (S n)
-  ||| n < m implies that n < m + 1
-  LTStep : LT' n m -> LT' n (S m)
 
 
-forEffect : ()
-forEffect = %runElab (deriveElim `{Vect} (NS (UN "vectElim") ["Elim", "Derive"]) *> trivial)
 
--- vectElim a Z Nil P nil cons = nil
--- vectElim a (S n) ((::) {a=a} {n=n} x xs) P nil cons = cons n x xs (vectElim a n xs P nil cons)
