@@ -2,6 +2,7 @@ module Derive.Elim
 
 import Data.Vect
 import Data.So
+--import Data.Nat
 
 import Derive.Kit
 import Language.Reflection.Elab
@@ -215,8 +216,8 @@ getSigmaArgs `(MkSigma {a=~_} {P=~_} ~rhsTy ~lhs) = return (rhsTy, lhs)
 getSigmaArgs arg = fail [TextPart "Not a sigma constructor"]
 
 getElimClause : TyConInfo -> (elimn : TTName) -> (methCount : Nat) ->
-                (TTName, Raw) -> Elab FunClause
-getElimClause info elimn methCount (cn, cty) =
+                (TTName, Raw) -> Nat -> Elab FunClause
+getElimClause info elimn methCount (cn, cty) whichCon =
   do (args, resTy) <- removeParams info cty
      pat <- runElab `(Sigma Type id) $
               do -- First set up the machinery to infer the type of the LHS
@@ -230,15 +231,6 @@ getElimClause info elimn methCount (cn, cty) =
                  traverse {b=()} (\(n, ty) => do claim n ty
                                                  unfocus n)
                           (getParams info)
-
-                 -- Establish holes for the indices, and put them in
-                 -- holes.  These aren't the pattern variables - we
-                 -- establish the relationship between patvar n and
-                 -- index hole ix using unification later
-                 ixs <- traverse {b=TTName} (\(n, ty) => do claim n ty
-                                                            unfocus n
-                                                            newHole "ix" ty)
-                                  (getIndices info)
 
                  -- Establish a hole for each argument to the constructor
                  traverse {b=()} (\arg => case arg of
@@ -256,10 +248,9 @@ getElimClause info elimn methCount (cn, cty) =
                  let indexApp : Raw =
                        applyMotive info paramApp (Var scrutinee) resTy
 
-                 todo <- snd <$> check indexApp
-                 args <- argHoles !(forgetTypes todo)
-                 let elimApp = mkApp indexApp (map Var args)
-                 apply elimApp
+                 -- We leave the RHS with a function type: motive -> method* -> res
+                 -- to make it easier to map methods to constructors
+                 apply indexApp
                  solve
 
                  -- Turn all remaining holes into pattern variables
@@ -272,16 +263,26 @@ getElimClause info elimn methCount (cn, cty) =
      (rhsTy, lhs) <- getSigmaArgs sigma
      rhs <- runElab (bindPatTys pvars rhsTy) $
               do repeatUntilFail bindPat
-                 -- CONTINUE HERE
-                 debug
-     debugMessage (show rhsTy)
-
+                 motiveN <- gensym "motive"
+                 intro (Just motiveN)
+                 prevMethods <- doTimes whichCon intro1
+                 methN <- gensym "useThisMethod"
+                 intro (Just methN)
+                 nextMethods <- intros
+                 apply (Var methN) ; solve
+     realRhs <- forgetTypes (fst rhs)
+     return $ MkFunClause (bindPats pvars lhs) realRhs
+--     debugMessage (show lhs)
 
 getElimClauses : TyConInfo -> (elimn : TTName) ->
                  List (TTName, Raw) -> Elab (List FunClause)
 getElimClauses info elimn ctors =
   let methodCount = length ctors
-  in traverse (getElimClause info elimn methodCount) ctors
+  in traverse (\(i, con) => getElimClause info elimn methodCount con i) (reverse $ enumerate ctors)
+
+instance Show FunClause where
+  show (MkFunClause x y) = "(MkFunClause " ++ show x ++ " " ++ show y ++ ")"
+  show (MkImpossibleClause x) = "(MkImpossibleClause " ++ show x ++ ")"
 
 deriveElim : (tyn, elimn : TTName) -> Elab ()
 deriveElim tyn elimn =
@@ -290,8 +291,21 @@ deriveElim tyn elimn =
      (MkDatatype tyn tyconArgs tyconRes ctors) <- lookupDatatypeExact tyn
      info <- getTyConInfo tyconArgs (Var tyn)
      declareType $ Declare elimn [] !(getElimTy info ctors)
-     clauses <- getElimClauses info elimn (reverse ctors)
+     clauses <- getElimClauses info elimn ctors
+--     debugMessage {a=()} (show (take 1 clauses))
+     defineFunction $ DefineFun elimn clauses
      return ()
+
+||| A strict less-than relation on `Nat`.
+|||
+||| @ n the smaller number
+||| @ m the larger number
+data LT' : (n,m : Nat) -> Type where
+  ||| n < 1 + n
+  LTSucc : LT' n (S n)
+  ||| n < m implies that n < m + 1
+  LTStep : LT' n m -> LT' n (S m)
+
 
 forEffect : ()
 forEffect = %runElab (deriveElim `{Vect} (NS (UN "vectElim") ["Elim", "Derive"]) *> trivial)

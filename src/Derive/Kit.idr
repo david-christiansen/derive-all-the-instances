@@ -32,6 +32,13 @@ argHoles (RBind n (Pi t _) body) = do n' <- nameFrom n
                                       (n ::) <$> argHoles body
 argHoles _ = return []
 
+enumerate : List a -> List (Nat, a)
+enumerate xs = enumerate' xs 0
+  where enumerate' : List a -> Nat -> List (Nat, a)
+        enumerate' [] _ = []
+        enumerate' (x::xs) n = (n, x) :: enumerate' xs (S n)
+
+
 namespace Renamers
   ||| Cause a renamer to forget a renaming
   restrict : (TTName -> Maybe TTName) -> TTName -> (TTName -> Maybe TTName)
@@ -173,6 +180,24 @@ namespace Tactics
                  Bind n (PVTy _) _ => patbind n
                  _ => fail [TermPart g, TextPart "isn't looking for a pattern."]
 
+  intro1 : Elab TTName
+  intro1 = do g <- snd <$> getGoal
+              case g of
+                Bind n (Pi _ _) _ => do n' <- nameFrom n
+                                        intro (Just n')
+                                        return n'
+                _ => fail [ TextPart "Can't intro1 because goal"
+                          , TermPart g
+                          , TextPart "isn't a function type."]
+
+  intros : Elab (List TTName)
+  intros = do g <- snd <$> getGoal
+              go g
+    where go : TT -> Elab (List TTName)
+          go (Bind n (Pi _ _) body) = do n' <- nameFrom n
+                                         intro (Just n')
+                                         (n' ::) <$> go body
+          go _ = return []
 
 --TODO: move to prelude
 instance (Show a, Show b) => Show (Either a b) where
