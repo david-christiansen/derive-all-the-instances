@@ -77,6 +77,12 @@ stealBindings (RBind n b tm) nsubst =
      return ((n', map (alphaRaw nsubst) b) :: bindings, result)
 stealBindings tm nsubst = return ([], alphaRaw nsubst tm)
 
+||| Grab the binders from around a term, assuming that they have been previously uniquified
+extractBinders : Raw -> (List (TTName, Binder Raw), Raw)
+extractBinders (RBind n b tm) = let (bs, res) = extractBinders tm
+                                in ((n, b) :: bs, res)
+extractBinders tm = ([], tm)
+
 ||| Get the type annotation from a binder
 getBinderTy : Binder t -> t
 getBinderTy (Lam t) = t

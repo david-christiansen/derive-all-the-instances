@@ -129,6 +129,9 @@ removeParams info ctorTy =
 
 ||| Apply the motive for elimination to some subject, inferring the
 ||| values of the indices from the type of the subject.
+||| @ motive the motive to apply
+||| @ arg the thing to which the motive will be applied
+||| @ argTy the type of the argument to the motive (will be used to calculate indices)
 applyMotive : TyConInfo -> (motive : Raw) -> (arg, argTy : Raw) -> Raw
 applyMotive info motive arg argTy =
   mkApp motive $
@@ -211,6 +214,7 @@ getElimTy info ctors =
                 solve
      forgetTypes (fst ty)
 
+
 getSigmaArgs : Raw -> Elab (Raw, Raw)
 getSigmaArgs `(MkSigma {a=~_} {P=~_} ~rhsTy ~lhs) = return (rhsTy, lhs)
 getSigmaArgs arg = fail [TextPart "Not a sigma constructor"]
@@ -253,7 +257,7 @@ getElimClause info elimn methCount (cn, cty) whichCon =
                  -- to make it easier to map methods to constructors
                  apply indexApp
                  solve
-                 
+
                  -- Fill the scrutinee with the concrete constructor pattern
                  focus scrutinee
                  apply $ mkApp (Var cn) $ map (\x => case x of
@@ -268,7 +272,7 @@ getElimClause info elimn methCount (cn, cty) whichCon =
                  traverse {b=()} (\h => do focus h ; patvar h) !getHoles
                  return ()
 
-     (pvars, sigma) <- stealBindings !(forgetTypes (fst pat)) (const Nothing)
+     let (pvars, sigma) = extractBinders !(forgetTypes (fst pat))
      (rhsTy, lhs) <- getSigmaArgs sigma
      rhs <- runElab (bindPatTys pvars rhsTy) $
               do repeatUntilFail bindPat
@@ -278,7 +282,31 @@ getElimClause info elimn methCount (cn, cty) whichCon =
                  methN <- gensym "useThisMethod"
                  intro (Just methN)
                  nextMethods <- intros
-                 apply (Var methN) ; solve
+
+                 -- Apply the appropriate method to the correct arguments.
+                 let argTms =
+                       concatMap
+                         (\x => case x of
+                                  Left _ => []
+                                  Right (n, t) =>
+                                    if headsMatch t (result info) -- recursive
+                                      then [ Var n
+                                           , let rec = mkApp (Var elimn) $
+                                                       map (Var . fst)
+                                                           (take (length (getParams info))
+                                                                 pvars)
+                                                 withArg = applyMotive info rec (Var n) t
+                                             in mkApp withArg $ [Var motiveN] ++
+                                                                map Var (toList prevMethods) ++
+                                                                [Var methN] ++
+                                                                map Var nextMethods
+                                           ]
+                                      else [Var n])
+                         args
+--                 debugMessage {a=()} (show  $ mkApp (Var methN) argTms)
+                 apply $ mkApp (Var methN) argTms
+--                 debug {a=()}
+                 solve
      realRhs <- forgetTypes (fst rhs)
      return $ MkFunClause (bindPats pvars lhs) realRhs
 --     debugMessage (show $ bindPats pvars lhs)
