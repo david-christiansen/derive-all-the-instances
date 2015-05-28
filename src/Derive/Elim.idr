@@ -53,9 +53,11 @@ getTyConInfo' [] res _ = return (MkTyConInfo [] res)
 getTyConInfo' (tcArg::tcArgs) res ren =
   do let n = tyConArgName tcArg
      n' <- nameFrom n
+     let ren' = extend ren n n'
      -- n' is globally unique so we don't worry about scope
-     next <- getTyConInfo' tcArgs (RApp res (Var n')) (extend ren n n')
-     return $ record {args = setTyConArgName tcArg n' :: args next} next
+     next <- getTyConInfo' tcArgs (RApp res (Var n')) ren'
+     return $ alphaTyConInfo ren' $
+       record {args = setTyConArgName tcArg n' :: args next} next
 
 getTyConInfo : List TyConArg -> Raw -> Elab TyConInfo
 getTyConInfo args res = getTyConInfo' args res (const Nothing)
@@ -68,12 +70,12 @@ bindParams info = traverse_ (uncurry forall) (getParams info)
 ||| rewrite an application of something to their designated global
 ||| names
 bindIndices : TyConInfo -> Elab (TTName -> Maybe TTName)
-bindIndices info = do ns <- traverse bindI (getIndices info)
-                      return $ foldr (\(n,n'), ren => extend ren n n') (const Nothing) ns
-  where bindI : (TTName, Raw) -> Elab (TTName, TTName)
-        bindI (n, t) = do n' <- nameFrom n
-                          forall n' t
-                          return (n, n')
+bindIndices info = bind' (getIndices info) (const Nothing)
+  where bind' : List (TTName, Raw) -> (TTName -> Maybe TTName) -> Elab (TTName -> Maybe TTName)
+        bind' []              ren = return ren
+        bind' ((n, t) :: ixs) ren = do n' <- nameFrom n
+                                       forall n' (alphaRaw ren t)
+                                       bind' ixs (extend ren n n')
 
 ||| Return the renaming required to use the result type for this binding of the indices
 bindTarget : TyConInfo -> Elab (TTName, (TTName -> Maybe TTName))
@@ -205,6 +207,7 @@ getElimTy info ctors =
                 forall motiveN (Var motiveH)
                 focus motiveH
                 elabMotive info
+
                 traverse_ (uncurry (bindMethod info motiveN)) ctors
                 let ret = mkApp (Var motiveN)
                                 (map (Var . fst)
@@ -305,13 +308,10 @@ getElimClause info elimn methCount (cn, cty) whichCon =
                                            ]
                                       else [Var n])
                          args
---                 debugMessage {a=()} (show  $ mkApp (Var methN) argTms)
                  apply $ mkApp (Var methN) argTms
---                 debug {a=()}
                  solve
      realRhs <- forgetTypes (fst rhs)
      return $ MkFunClause (bindPats pvars lhs) realRhs
---     debugMessage (show $ bindPats pvars lhs)
 
 getElimClauses : TyConInfo -> (elimn : TTName) ->
                  List (TTName, Raw) -> Elab (List FunClause)
@@ -329,9 +329,9 @@ deriveElim tyn elimn =
      -- 1. The type name uniquely determines a datatype
      (MkDatatype tyn tyconArgs tyconRes ctors) <- lookupDatatypeExact tyn
      info <- getTyConInfo tyconArgs (Var tyn)
-     declareType $ Declare elimn [] !(getElimTy info ctors)
+     declareType $ Declare elimn [] !(getElimTy info ctors) 
      clauses <- getElimClauses info elimn ctors
---     debugMessage {a=()} (show (take 1 clauses))
+
      defineFunction $ DefineFun elimn clauses
      return ()
 
