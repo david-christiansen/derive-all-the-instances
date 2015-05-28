@@ -317,7 +317,7 @@ getElimClauses : TyConInfo -> (elimn : TTName) ->
                  List (TTName, Raw) -> Elab (List FunClause)
 getElimClauses info elimn ctors =
   let methodCount = length ctors
-  in traverse (\(i, con) => getElimClause info elimn methodCount con i) (reverse $ enumerate ctors)
+  in traverse (\(i, con) => getElimClause info elimn methodCount con i) (enumerate ctors)
 
 instance Show FunClause where
   show (MkFunClause x y) = "(MkFunClause " ++ show x ++ " " ++ show y ++ ")"
