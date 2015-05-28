@@ -3,6 +3,6 @@ package derive
 -- Derive All The Instances!
 -- by David Raymond Christiansen
 
-opts = "-p config"
+opts = "-p contrib"
 sourcedir = src
-modules = Derive.Disjoint, Derive.Kit, Derive.Injective, Derive.Elim
+modules = Derive.Disjoint, Derive.Kit, Derive.Injective, Derive.Elim, Derive.ElimTest

@@ -158,6 +158,25 @@ headsMatch x y =
     (Just n1, Just n2) => n1 == n2
     _ => False
 
+||| Make an induction hypothesis if one is called for
+mkIh : TyConInfo -> (motiveName : TTName) -> (recArg : TTName) -> (argty, fam : Raw) -> Elab ()
+mkIh info motiveName recArg argty fam =
+  case !(stealBindings argty (const Nothing)) of
+    (argArgs, argRes) =>
+      if headsMatch argRes fam
+        then do ih <- gensym "ih"
+                ihT <- newHole "ihT" `(Type)
+                forall ih (Var ihT)
+                focus ihT
+                attack
+                traverse_ {b=()} (\(n, b) => forall n (getBinderTy b)) argArgs
+                let argTm : Raw = mkApp (Var recArg) (map (Var . fst) argArgs)
+                argTmTy <- forgetTypes (snd !(check argTm))
+                apply $ applyMotive info (Var motiveName) argTm argTmTy
+                solve -- attack
+                solve -- ihT
+        else return ()
+
 elabMethodTy : TyConInfo -> TTName -> List (Either TTName (TTName, Raw)) -> Raw -> Raw -> Elab ()
 elabMethodTy info motiveName [] res ctorApp =
   do apply $ applyMotive info (Var motiveName) ctorApp res
@@ -166,17 +185,7 @@ elabMethodTy info motiveName (Left paramN  :: args) res ctorApp =
   elabMethodTy info motiveName args  res (RApp ctorApp (Var paramN))
 elabMethodTy info motiveName (Right (n, t) :: args) res ctorApp =
   do attack; forall n t
-     if headsMatch t (result info)
-       then do arg <- newHole "arg" t
-               ih <- gensym "ih"
-               ihT <- newHole "ihT" `(Type)
-               forall ih (Var ihT)
-               focus ihT
-               apply $ applyMotive info (Var motiveName) (Var arg) t
-               solve
-               focus arg
-               apply (Var n); solve
-       else return ()
+     mkIh info motiveName n t (result info)
      elabMethodTy info motiveName args res (RApp ctorApp (Var n))
      solve
 
