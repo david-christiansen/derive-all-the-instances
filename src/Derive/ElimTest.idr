@@ -87,9 +87,12 @@ wS n = Sup True (const n)
 
 indWNat : (P : wNat -> Type) -> P wZ -> ((n : wNat) -> P n -> P (wS n)) -> (n : wNat) -> P n
 indWNat P z s n = wElim Bool wNatStep n P
-                        (\b => case b of
-                                 False => \f, _ => rewrite voidFunext f void in z
-                                 True => \f, ih => rewrite unitFunext f in s (f ()) (ih ()))
+                    (\b => boolElim b
+                            (\b' => (f : wNatStep b' -> wNat) ->
+                                    ((x : wNatStep b') -> P (f x)) ->
+                                    P (Sup b' f))
+                            (\f, _ => rewrite voidFunext f void in z)
+                            (\f, ih => rewrite unitFunext f in s (f ()) (ih ())))
   where
     postulate funext : (f, g : a -> b) -> ((x : a) -> f x = g x) -> f = g
     voidFunext : (f, g : Void -> a) -> f = g
