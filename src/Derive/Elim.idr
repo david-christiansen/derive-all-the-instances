@@ -298,30 +298,39 @@ getElimClause info elimn methCount (cn, cty) whichCon =
                  nextMethods <- intros
 
                  -- Apply the appropriate method to the correct arguments.
-                 let argTms =
-                       concatMap
+                 argTms <- Foldable.concat <$>
+                        traverse
                          (\x => case x of
-                                  Left _ => []
+                                  Left _ => return List.Nil
                                   Right (n, t) =>
-                                    if headsMatch t (result info) -- recursive
-                                      then [ Var n
-                                           , let rec = mkApp (Var elimn) $
-                                                       map (Var . fst)
-                                                           (take (length (getParams info))
-                                                                 pvars)
-                                                 withArg = applyMotive info rec (Var n) t
-                                             in mkApp withArg $ [Var motiveN] ++
-                                                                map Var (toList prevMethods) ++
-                                                                [Var methN] ++
-                                                                map Var nextMethods
-                                           ]
-                                      else [Var n])
+                                    do (argArgs, argRes) <- stealBindings t (const Nothing)
+                                       if headsMatch argRes (result info) -- recursive
+                                         then
+                                           do let rec = mkApp (Var elimn) $
+                                                        map (\pv => Var (fst pv))
+                                                            (take (length (getParams info))
+                                                                  pvars)
+                                              let recArg = mkApp (Var n) (map (Var . fst) argArgs)
+                                              let withArg = applyMotive info rec recArg t
+                                              let step = bindLam argArgs $
+                                                         mkApp withArg $
+                                                           [Var motiveN] ++
+                                                           map Var (toList prevMethods) ++
+                                                           [Var methN] ++
+                                                           map Var nextMethods
+                                              return [Var n, step]
+                                         else return [Var n])
                          args
+
                  apply $ mkApp (Var methN) argTms
+
                  solve
      realRhs <- forgetTypes (fst rhs)
      return $ MkFunClause (bindPats pvars lhs) realRhs
-
+  where bindLam : List (TTName, Binder Raw) -> Raw -> Raw
+        bindLam [] x = x
+        bindLam ((n, b)::args) x = RBind n (Lam (getBinderTy b)) $ bindLam args x
+  
 getElimClauses : TyConInfo -> (elimn : TTName) ->
                  List (TTName, Raw) -> Elab (List FunClause)
 getElimClauses info elimn ctors =

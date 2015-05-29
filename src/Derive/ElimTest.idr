@@ -52,8 +52,9 @@ forEffect = %runElab (do deriveElim `{Vect} (mkName "vectElim")
                          deriveElim `{Unit} (mkName "unitElim")
                          deriveElim `{Even} (mkName "evenElim")
                          deriveElim `{Odd} (mkName "oddElim")
-                         deriveElim `{Accessible} (mkName "accElim")
+                         --deriveElim `{Accessible} (mkName "accElim")
                          trivial)
+
 
 ||| Simple function computed using an eliminator
 rev : List a -> List a
@@ -97,7 +98,11 @@ indWNat P z s n = wElim Bool wNatStep n P
                             (\f, _ => rewrite voidFunext f void in z)
                             (\f, ih => rewrite unitFunext f in s (f ()) (ih ())))
   where
-    postulate funext : (f, g : a -> b) -> ((x : a) -> f x = g x) -> f = g
+    ||| Functional extensionality that uses unsafe features to get it
+    ||| to actually compute. This is evil and perhaps even inconsistent:
+    ||| replace with a postulate for sanity. But it lets addition of wNat go.
+    funext : (f, g : a -> b) -> ((x : a) -> f x = g x) -> f = g
+    funext {a} {b} f g fun = really_believe_me (Refl {A=a->b} {x=f})
     voidFunext : (f, g : Void -> a) -> f = g
     voidFunext = \f,g => funext f g (\x => voidElim x (const (f x = g x)))
     unitEta : (x : ()) -> x = ()
@@ -105,10 +110,15 @@ indWNat P z s n = wElim Bool wNatStep n P
     unitFunext : (f : () -> a) -> f = \x => f ()
     unitFunext = \f => funext f (\x => f ()) (\x => cong (unitEta x))
 
+addWNat : wNat -> wNat -> wNat
+addWNat x y = indWNat (const wNat) y (\_, m => wS m) x
+
+
 
 ||| Recover the induction principle over well-founded relations from the generated one
 accInd' : {rel : a -> a -> Type} -> {P : a -> Type} ->
           (step : (x : a) -> ((y : a) -> rel y x -> P y) -> P x) ->
           (z : a) -> Accessible rel z -> P z
-accInd' {a} {rel} {P} step z acc =
-  accElim a rel z acc (\x, _ => P x) (\y, acc', ih => step y ih)
+-- accInd' {a} {rel} {P} step z acc =
+--   accElim a rel z acc (\x, _ => P x) (\y, acc', ih => step y ih)
+
