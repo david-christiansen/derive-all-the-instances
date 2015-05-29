@@ -1,24 +1,18 @@
+||| Various tests of automatically-generated eliminators, to show that
+||| the compiler doesn't barf and that they can be used for proving
+||| things.
 module ElimTest
 
 import Data.Vect
 import Data.So
 import Control.WellFounded
+import Data.Nat
 
 import Language.Reflection.Elab
 import Derive.Elim
 import Derive.Kit
 
 %default total
-
-||| A strict less-than relation on `Nat`.
-|||
-||| @ n the smaller number
-||| @ m the larger number
-data LT' : (n,m : Nat) -> Type where
-  ||| n < 1 + n
-  LTSucc : LT' n (S n)
-  ||| n < m implies that n < m + 1
-  LTStep : LT' n m -> LT' n (S m)
 
 mkName : String -> TTName
 mkName n = NS (UN n) ["ElimTest"]
@@ -61,30 +55,39 @@ forEffect = %runElab (do deriveElim `{Vect} (mkName "vectElim")
                          deriveElim `{Accessible} (mkName "accElim")
                          trivial)
 
-
+||| Simple function computed using an eliminator
 rev : List a -> List a
 rev {a} xs = listElim a xs (const $ List a) [] (\y, _, ys => ys ++ [y])
 
+||| Simple proof by induction using a generated eliminator
 total
 plusIsAssociative : (x,y,z : Nat) -> plus x (plus y z) = plus (plus x y) z
 plusIsAssociative = \x,y,z => natElim x (\n => plus n (plus y z) = plus (plus n y) z) Refl (\n, ih => cong ih)
 
 
-
+||| The "shape" of the underlying tree for Nat encoded as a W-type
 wNatStep : Bool -> Type
 wNatStep b = if b then () else Void
 
+||| Nats, as a W-type
 wNat : Type
 wNat = W Bool wNatStep
 
+||| Zero (it has no predecessors!)
 wZ : wNat
 wZ = Sup False void
 
+||| Succ (it has a single predecessor, thus ()!)
 wS : wNat -> wNat
 wS n = Sup True (const n)
 
 
-
+||| The induction principle for Nat, here expressed on Nat encoded as W-types.
+|||
+||| Note that this only works for this particular encoding of the
+||| Nat. A separate, equivalent encoding would not work due to W-types
+||| being basically useless in intensional type theory. Nevertheless,
+||| it demonstrates that the generated eliminators can be used.
 indWNat : (P : wNat -> Type) -> P wZ -> ((n : wNat) -> P n -> P (wS n)) -> (n : wNat) -> P n
 indWNat P z s n = wElim Bool wNatStep n P
                     (\b => boolElim b
@@ -99,12 +102,11 @@ indWNat P z s n = wElim Bool wNatStep n P
     voidFunext = \f,g => funext f g (\x => voidElim x (const (f x = g x)))
     unitEta : (x : ()) -> x = ()
     unitEta () = Refl
-    funEta : (f : a -> b) -> f = \x => f x
-    funEta = \f => Refl
     unitFunext : (f : () -> a) -> f = \x => f ()
     unitFunext = \f => funext f (\x => f ()) (\x => cong (unitEta x))
 
 
+||| Recover the induction principle over well-founded relations from the generated one
 accInd' : {rel : a -> a -> Type} -> {P : a -> Type} ->
           (step : (x : a) -> ((y : a) -> rel y x -> P y) -> P x) ->
           (z : a) -> Accessible rel z -> P z
