@@ -11,6 +11,7 @@ import Data.Nat
 import Language.Reflection.Elab
 import Derive.Elim
 import Derive.Kit
+import Derive.TestDefs
 
 %default total
 
@@ -26,8 +27,6 @@ mutual
   el UNIT = ()
   el (PI ty ret) = (x : el ty) -> (el $ ret x)
 
-data W : (t : Type) -> (P : t -> Type) -> Type where
-  Sup : (x : a) -> (f : p x -> W a p) -> W a p
 
 mutual
   data Even : Nat -> Type where
@@ -52,7 +51,7 @@ forEffect = %runElab (do deriveElim `{Vect} (mkName "vectElim")
                          deriveElim `{Unit} (mkName "unitElim")
                          deriveElim `{Even} (mkName "evenElim")
                          deriveElim `{Odd} (mkName "oddElim")
-                         --deriveElim `{Accessible} (mkName "accElim")
+                         deriveElim `{Accessible} (mkName "accElim")
                          trivial)
 
 
@@ -119,6 +118,6 @@ addWNat x y = indWNat (const wNat) y (\_, m => wS m) x
 accInd' : {rel : a -> a -> Type} -> {P : a -> Type} ->
           (step : (x : a) -> ((y : a) -> rel y x -> P y) -> P x) ->
           (z : a) -> Accessible rel z -> P z
--- accInd' {a} {rel} {P} step z acc =
---   accElim a rel z acc (\x, _ => P x) (\y, acc', ih => step y ih)
+accInd' {a} {rel} {P} step z acc =
+  accElim a rel z acc (\x, _ => P x) (\y, acc', ih => step y ih)
 

@@ -7,6 +7,33 @@ import Language.Reflection.Utils
 
 %default total
 
+last : List a -> Elab a
+last [] = fail [TextPart "Unexpected empty list"]
+last [x] = return x
+last (_::x::xs) = last (x::xs)
+
+||| Ensure that all of a collection of holes was properly solved, to
+||| sanity-check a use of `apply`
+allSolved : List TTName -> Elab ()
+allSolved ns = allSolved' ns !getHoles
+  where allSolved' : List TTName -> List TTName -> Elab ()
+        allSolved' [] hs = return ()
+        allSolved' (n::ns) hs =
+          if elem n hs
+            then debugMessage [TextPart "Not all holes were solved! Remaining: ",
+                       TextPart $ show n,
+                       TextPart $ show hs]
+            else allSolved' ns hs
+
+zipH : List a -> List b -> Elab (List (a, b))
+zipH [] [] = return []
+zipH (x::xs) (y::ys) = ((x, y) ::) <$> zipH xs ys
+zipH _ _ = fail [TextPart "length mismatch"]
+
+assoc : Eq a => a -> List (a, b) -> Elab b
+assoc x [] = fail [ TextPart "not found" ]
+assoc x ((y, z)::ys) = if x == y then return z else assoc x ys
+
 doTimes : Applicative m => (n : Nat) -> m a -> m (Vect n a)
 doTimes Z x = pure []
 doTimes (S k) x = [| x :: (doTimes k x) |]
