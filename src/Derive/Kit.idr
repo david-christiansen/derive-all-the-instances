@@ -123,6 +123,16 @@ bindPatTys : List (TTName, Binder Raw) -> Raw -> Raw
 bindPatTys [] res = res
 bindPatTys ((n, b)::bs) res = RBind n (PVTy (getBinderTy b)) $ bindPatTys bs res
 
+argName : Arg -> TTName
+argName (Explicit   n x tm) = n
+argName (Implicit   n x tm) = n
+argName (Constraint n x tm) = n
+
+argTy : Arg -> Raw
+argTy (Explicit   n x ty) = ty
+argTy (Implicit   n x ty) = ty
+argTy (Constraint n x ty) = ty
+
 
 tyConArgName : TyConArg -> TTName
 tyConArgName (Parameter n _ _) = n
