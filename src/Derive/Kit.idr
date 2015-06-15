@@ -95,8 +95,8 @@ getBinderTy (Guess t _) = t
 getBinderTy (PVar t) = t
 getBinderTy (PVTy t) = t
 
-mkDecl : TTName -> List (TTName, Binder Raw) -> Raw -> TyDecl
-mkDecl fn xs tm = Declare fn (map (\(n, b) => Implicit n (getBinderTy b)) xs) tm
+mkDecl : TTName -> List (TTName, Erasure, Binder Raw) -> Raw -> TyDecl
+mkDecl fn xs tm = Declare fn (map (\(n, e, b) => Implicit n e (getBinderTy b)) xs) tm
 
 mkApp : Raw -> List Raw -> Raw
 mkApp f [] = f
@@ -125,16 +125,16 @@ bindPatTys ((n, b)::bs) res = RBind n (PVTy (getBinderTy b)) $ bindPatTys bs res
 
 
 tyConArgName : TyConArg -> TTName
-tyConArgName (Parameter n _) = n
-tyConArgName (Index n _) = n
+tyConArgName (Parameter n _ _) = n
+tyConArgName (Index n _ _) = n
 
 setTyConArgName : TyConArg -> TTName -> TyConArg
-setTyConArgName (Parameter _ t) n = Parameter n t
-setTyConArgName (Index _ t) n = Index n t
+setTyConArgName (Parameter _ e t) n = Parameter n e t
+setTyConArgName (Index _ e t) n = Index n e t
 
 updateTyConArgTy : (Raw -> Raw) -> TyConArg -> TyConArg
-updateTyConArgTy f (Parameter n t) = Parameter n (f t)
-updateTyConArgTy f (Index n t) = Index n (f t)
+updateTyConArgTy f (Parameter n e t) = Parameter n e (f t)
+updateTyConArgTy f (Index n e t) = Index n e (f t)
 
 namespace Tactics
   newHole : String -> Raw -> Elab TTName
@@ -151,25 +151,25 @@ namespace Tactics
                g <- snd <$> getGoal
                case !(forgetTypes g) of
                  `((=) {A=~A} {B=~_} ~x ~_) =>
-                     do apply [| (Var `{Refl}) A x |]
+                     do apply [| (Var `{Refl}) A x |] []
                         solve
                  `(() : Type) =>
-                     do apply `(() : ())
+                     do apply `(() : ()) []
                         solve
                  `(Pair ~t1 ~t2) =>
                      do fstH <- newHole "fst" t1
                         sndH <- newHole "snd" t2
-                        apply `(MkPair {A=~t1} {B=~t2} ~(Var fstH) ~(Var sndH))
+                        apply `(MkPair {A=~t1} {B=~t2} ~(Var fstH) ~(Var sndH)) []
                         solve
                         focus fstH; trivial
                         focus sndH; trivial
                  `(Either ~a ~b) =>
                     (do lft <- newHole "left" a
-                        apply `(Left {a=~a} {b=~b} ~(Var lft))
+                        apply `(Left {a=~a} {b=~b} ~(Var lft)) []
                         solve
                         focus lft; trivial) <|>
                     (do rght <- newHole "right" b
-                        apply `(Right {a=~a} {b=~b} ~(Var rght))
+                        apply `(Right {a=~a} {b=~b} ~(Var rght)) []
                         solve
                         focus rght; trivial)
                  _ =>
