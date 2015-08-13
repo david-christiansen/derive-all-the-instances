@@ -51,6 +51,12 @@ nameFrom (MN x n) = gensym $ if length n == 0 || ("_" `isPrefixOf` n)
 nameFrom (SN x) = gensym "SN"
 nameFrom NErased = gensym "wasErased"
 
+headVar : Raw -> Maybe TTName
+headVar (RApp f _) = headVar f
+headVar (Var n) = Just n
+headVar x = Nothing
+
+
 ||| Generate holes suitable as arguments to a term of some type
 argHoles : Raw -> Elab (List TTName)
 argHoles (RBind n (Pi t _) body) = do n' <- nameFrom n
@@ -95,6 +101,7 @@ alphaRaw subst (RUType x) = RUType x
 alphaRaw subst (RForce tm) = RForce (alphaRaw subst tm)
 alphaRaw subst (RConstant c) = RConstant c
 
+
 ||| Grab the binders from around a term, alpha-converting to make their names unique
 partial
 stealBindings : Raw -> (nsubst : TTName -> Maybe TTName) -> Elab (List (TTName, Binder Raw), Raw)
@@ -123,7 +130,7 @@ getBinderTy (PVar t) = t
 getBinderTy (PVTy t) = t
 
 mkDecl : TTName -> List (TTName, Erasure, Binder Raw) -> Raw -> TyDecl
-mkDecl fn xs tm = Declare fn (map (\(n, e, b) => Implicit n e (getBinderTy b)) xs) tm
+mkDecl fn xs tm = Declare fn (map (\(n, e, b) => MkFunArg  n (getBinderTy b) Implicit e) xs) tm
 
 mkApp : Raw -> List Raw -> Raw
 mkApp f [] = f
@@ -150,28 +157,20 @@ bindPatTys : List (TTName, Binder Raw) -> Raw -> Raw
 bindPatTys [] res = res
 bindPatTys ((n, b)::bs) res = RBind n (PVTy (getBinderTy b)) $ bindPatTys bs res
 
-argName : Arg -> TTName
-argName (Explicit   n x tm) = n
-argName (Implicit   n x tm) = n
-argName (Constraint n x tm) = n
-
-argTy : Arg -> Raw
-argTy (Explicit   n x ty) = ty
-argTy (Implicit   n x ty) = ty
-argTy (Constraint n x ty) = ty
-
+updateFunArgTy : (Raw -> Raw) -> FunArg -> FunArg
+updateFunArgTy f arg = record {argTy = f (record {argTy} arg)} arg
 
 tyConArgName : TyConArg -> TTName
-tyConArgName (Parameter n _ _) = n
-tyConArgName (Index n _ _) = n
+tyConArgName (TyConParameter a) = argName a
+tyConArgName (TyConIndex a) = argName a
 
 setTyConArgName : TyConArg -> TTName -> TyConArg
-setTyConArgName (Parameter _ e t) n = Parameter n e t
-setTyConArgName (Index _ e t) n = Index n e t
+setTyConArgName (TyConParameter a) n = TyConParameter (record {argName = n} a)
+setTyConArgName (TyConIndex a) n = TyConIndex (record {argName = n} a)
 
 updateTyConArgTy : (Raw -> Raw) -> TyConArg -> TyConArg
-updateTyConArgTy f (Parameter n e t) = Parameter n e (f t)
-updateTyConArgTy f (Index n e t) = Index n e (f t)
+updateTyConArgTy f (TyConParameter a) = TyConParameter (record {argTy = f (argTy a) } a)
+updateTyConArgTy f (TyConIndex a) = TyConIndex (record {argTy = f (argTy a) } a)
 
 namespace Tactics
   newHole : String -> Raw -> Elab TTName

@@ -5,64 +5,10 @@ import Data.So
 --import Data.Nat
 
 import Derive.Kit
+import Derive.Util.TyConInfo
 import Language.Reflection.Elab
 import Language.Reflection.Utils
 import Derive.TestDefs
-
-||| A representation of a type constructor in which all argument names
-||| are made unique and they are separated into params and then
-||| indices.
-record TyConInfo where
-  constructor MkTyConInfo
-  ||| Invariant: the names of the args have been made unique
-  args : List TyConArg
-  ||| The type constructor, applied to its arguments
-  result : Raw
-
-getParams : TyConInfo -> List (TTName, Raw)
-getParams info = mapMaybe param (args info)
-  where param : TyConArg -> Maybe (TTName, Raw)
-        param (Parameter n _ t) = Just (n, t)
-        param _ = Nothing
-
-getIndices : TyConInfo -> List (TTName, Raw)
-getIndices info = mapMaybe index (args info)
-  where index : TyConArg -> Maybe (TTName, Raw)
-        index (Index n _ t) = Just (n, t)
-        index _ = Nothing
-
-||| Rename a bound variable across a telescope
-renameIn : (from, to : TTName) -> List (TTName, Raw) -> List (TTName, Raw)
-renameIn from to [] = []
-renameIn from to ((n, ty)::tele) =
-    (n, alphaRaw (rename from to) ty) ::
-      if from == n
-        then tele
-        else renameIn from to tele
-
-||| Rename a free variable in type constructor info (used to implement
-||| alpha-conversion for unique binder names, hence the odd name)
-alphaTyConInfo : (TTName -> Maybe TTName) -> TyConInfo -> TyConInfo
-alphaTyConInfo ren (MkTyConInfo [] res) = MkTyConInfo [] (alphaRaw ren res)
-alphaTyConInfo ren (MkTyConInfo (tcArg::tcArgs) res) =
-  let MkTyConInfo tcArgs' res' = alphaTyConInfo (restrict ren (tyConArgName tcArg)) (MkTyConInfo tcArgs res)
-      tcArg' = updateTyConArgTy (alphaRaw ren) tcArg
-  in MkTyConInfo (tcArg'::tcArgs') res'
-
-getTyConInfo' : List TyConArg -> Raw -> (TTName -> Maybe TTName) -> Elab TyConInfo
-getTyConInfo' [] res _ = return (MkTyConInfo [] res)
-getTyConInfo' (tcArg::tcArgs) res ren =
-  do let n = tyConArgName tcArg
-     n' <- nameFrom n
-     let ren' = extend ren n n'
-     -- n' is globally unique so we don't worry about scope
-     next <- getTyConInfo' tcArgs (RApp res (Var n')) ren'
-     return $ alphaTyConInfo ren' $
-       record {args = setTyConArgName tcArg n' :: args next} next
-
-getTyConInfo : List TyConArg -> Raw -> Elab TyConInfo
-getTyConInfo args res = getTyConInfo' args res (const Nothing)
-
 
 bindParams : TyConInfo -> Elab ()
 bindParams info = traverse_ (uncurry forall) (getParams info)
@@ -94,50 +40,8 @@ elabMotive info = do attack
                      solve -- the attack
                      solve -- the motive type hole
 
-||| Point ctor arguments that are parameters at the global param
-||| quantification.
-|||
-||| We keep the other arguments, such as indices, but assign them
-||| unique names so we don't have to worry about shadowing later.
-removeParams : TyConInfo -> List Arg -> Raw -> Elab (List (Either TTName (TTName, Raw)), Raw)
-removeParams info args res =
-  --TODO: uniquify arg names (remember to rename in binder types)
-  do return $ killParams args res
-  where isParamName : TTName -> Maybe TTName
-        isParamName name = if elem name (map fst $ getParams info)
-                             then Just name
-                             else Nothing
-
-        isParamIn : (argn : TTName) -> (resty : Raw) -> (infoTy : Raw) -> Maybe TTName
-        isParamIn argn (RApp f (Var x)) (RApp g (Var y)) =
-          if argn == x
-            then isParamName y
-            else isParamIn argn f g
-        isParamIn argn (RApp f _) (RApp g _) = isParamIn argn f g
-        isParamIn _ (Var _) (Var _) = Nothing
-        isParamIn argn resty infoTy = Nothing -- shouldn't happen - TODO fail ["error checking param name"]
-
-        killParams : List Arg ->
-                     Raw ->
-                     (List (Either TTName (TTName, Raw)), Raw)
-        killParams []          res = ([], res)
-        killParams (thisArg::moreArgs) res =
-          let (args', res') = killParams moreArgs res
-              n = argName thisArg
-              t = argTy thisArg
-          in case isParamIn n res' (result info) of
-               Just glob => (Left glob :: map (renIndex n glob) args',
-                             alphaRaw (rename n glob) res')
-               Nothing => (Right (n, t) :: args', res')
-          where renIndex : TTName -> TTName -> Either TTName (TTName, Raw) -> Either TTName (TTName, Raw)
-                renIndex n glob (Right (n', t)) = Right (n', alphaRaw (rename n glob) t)
-                renIndex _ _ (Left p) = Left p
 
 
-headVar : Raw -> Maybe TTName
-headVar (RApp f _) = headVar f
-headVar (Var n) = Just n
-headVar x = Nothing
 
 headsMatch : Raw -> Raw -> Bool
 headsMatch x y =
@@ -170,7 +74,7 @@ mkIh info motiveName recArg argty fam =
                 solve -- ihT
         else return ()
 
-elabMethodTy : TyConInfo -> TTName -> List (Either TTName (TTName, Raw)) -> Raw -> Raw -> Elab ()
+elabMethodTy : TyConInfo -> TTName -> List CtorArg -> Raw -> Raw -> Elab ()
 elabMethodTy info motiveName [] res ctorApp =
   do argHoles <- apply (Var motiveName)
                        (replicate (length (getIndices info)) (True, 0) ++
@@ -178,32 +82,32 @@ elabMethodTy info motiveName [] res ctorApp =
      argH <- snd <$> last argHoles
      focus argH; fill ctorApp; solve
      solve
-elabMethodTy info motiveName (Left paramN  :: args) res ctorApp =
-  elabMethodTy info motiveName args  res (RApp ctorApp (Var paramN))
-elabMethodTy info motiveName (Right (n, t) :: args) res ctorApp =
-  do attack; forall n t
+elabMethodTy info motiveName (CtorParameter arg  :: args) res ctorApp =
+  elabMethodTy info motiveName args  res (RApp ctorApp (Var (argName arg)))
+elabMethodTy info motiveName (CtorField arg :: args) res ctorApp =
+  do let n = argName arg
+     let t = argTy arg
+     attack; forall n t
      mkIh info motiveName n t (result info)
      elabMethodTy info motiveName args res (RApp ctorApp (Var n))
      solve
 
 
 
-
-elabMethod : TyConInfo -> (motiveName, ctorN : TTName) -> List Arg -> Raw -> Elab ()
-elabMethod info motiveName ctorN ctorArgs cty =
-  do (args', resTy) <- removeParams info ctorArgs cty
-     elabMethodTy info motiveName args' resTy (Var ctorN)
+elabMethod : TyConInfo -> (motiveName, ctorN : TTName) -> List CtorArg -> Raw -> Elab ()
+elabMethod info motiveName ctorN ctorArgs resTy =
+  do elabMethodTy info motiveName ctorArgs resTy (Var ctorN)
 
 
 ||| Bind a method for a constructor
-bindMethod : TyConInfo -> (motiveName, cn : TTName) -> List Arg -> Raw -> Elab ()
+bindMethod : TyConInfo -> (motiveName, cn : TTName) -> List CtorArg -> Raw -> Elab ()
 bindMethod info motiveName cn cargs cty =
   do n <- nameFrom cn
      h <- newHole "methTy" `(Type)
      forall n (Var h)
      focus h; elabMethod info motiveName cn cargs cty
 
-getElimTy : TyConInfo -> List (TTName, List Arg, Raw) -> Elab Raw
+getElimTy : TyConInfo -> List (TTName, List CtorArg, Raw) -> Elab Raw
 getElimTy info ctors =
   do ty <- runElab `(Type) $
              do bindParams info
@@ -237,11 +141,9 @@ instance Show ElimArg where
   show (NormalArgument x) = "NormalArgument " ++ show x
 
 getElimClause : TyConInfo -> (elimn : TTName) -> (methCount : Nat) ->
-                (TTName, List Arg, Raw) -> Nat -> Elab FunClause
-getElimClause info elimn methCount (cn, cargs, cty) whichCon =
-  do (args, resTy) <- removeParams info cargs cty
-
-     pat <- runElab `(Sigma Type id) $
+                (TTName, List CtorArg, Raw) -> Nat -> Elab FunClause
+getElimClause info elimn methCount (cn, args, resTy) whichCon =
+  do pat <- runElab `(Sigma Type id) $
               do -- First set up the machinery to infer the type of the LHS
                  th <- newHole "finalTy" `(Type)
                  patH <- newHole "pattern" (Var th)
@@ -256,9 +158,9 @@ getElimClause info elimn methCount (cn, cargs, cty) whichCon =
 
                  -- Establish a hole for each argument to the constructor
                  traverse {b=()} (\arg => case arg of
-                                            Left _ => return ()
-                                            Right (n, ty) => do claim n ty
-                                                                unfocus n)
+                                            CtorParameter _ => return ()
+                                            CtorField arg => do claim (argName arg) (argTy arg)
+                                                                unfocus (argName arg))
                    args
 
                  -- Establish a hole for the scrutinee (infer type)
@@ -280,10 +182,11 @@ getElimClause info elimn methCount (cn, cargs, cty) whichCon =
 
                  -- Fill the scrutinee with the concrete constructor pattern
                  focus scrutinee
-                 apply (mkApp (Var cn) $ map (\x => case x of
-                                                       Left pn => Var pn
-                                                       Right (n,_) => Var n)
-                                              args)
+                 apply (mkApp (Var cn) $
+                          map (\x => case x of
+                                       CtorParameter param => Var (argName param)
+                                       CtorField arg => Var (argName arg))
+                              args)
                        []
                  solve
 
@@ -307,9 +210,11 @@ getElimClause info elimn methCount (cn, cargs, cty) whichCon =
 
                  argSpec <- Foldable.concat <$>
                               traverse (\x => case x of
-                                                Left _ => return List.Nil
-                                                Right (n, t) =>
-                                                  do (argArgs, argRes) <- stealBindings t (const Nothing)
+                                                CtorParameter _ => return List.Nil
+                                                CtorField arg =>
+                                                  do let n = argName arg
+                                                     let t = argTy arg
+                                                     (argArgs, argRes) <- stealBindings t (const Nothing)
                                                      if headsMatch argRes (result info) --recursive
                                                        then return [ NormalArgument n
                                                                    , IHArgument n
@@ -359,10 +264,10 @@ getElimClause info elimn methCount (cn, cargs, cty) whichCon =
      return $ MkFunClause (bindPats pvars lhs) realRhs
   where bindLam : List (TTName, Binder Raw) -> Raw -> Raw
         bindLam [] x = x
-        bindLam ((n, b)::args) x = RBind n (Lam (getBinderTy b)) $ bindLam args x
+        bindLam ((n, b)::rest) x = RBind n (Lam (getBinderTy b)) $ bindLam rest x
 
 getElimClauses : TyConInfo -> (elimn : TTName) ->
-                 List (TTName, List Arg, Raw) -> Elab (List FunClause)
+                 List (TTName, List CtorArg, Raw) -> Elab (List FunClause)
 getElimClauses info elimn ctors =
   let methodCount = length ctors
   in traverse (\(i, con) => getElimClause info elimn methodCount con i) (enumerate ctors)
@@ -374,8 +279,9 @@ deriveElim : (tyn, elimn : TTName) -> Elab ()
 deriveElim tyn elimn =
   do -- Begin with some basic sanity checking
      -- 1. The type name uniquely determines a datatype
-     (MkDatatype tyn tyconArgs tyconRes ctors) <- lookupDatatypeExact tyn
+     (MkDatatype tyn tyconArgs tyconRes ctors') <- lookupDatatypeExact tyn
      info <- getTyConInfo tyconArgs (Var tyn)
+     ctors <- traverse (processCtorArgs info) ctors'
      declareType $ Declare elimn [] !(getElimTy info ctors)
      clauses <- getElimClauses info elimn ctors
 

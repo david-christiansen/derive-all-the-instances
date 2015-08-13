@@ -6,7 +6,7 @@ module ElimTest
 import Data.Vect
 import Data.So
 import Control.WellFounded
-import Data.Nat
+import Data.Nat.DivMod.IteratedSubtraction
 
 import Language.Reflection.Elab
 import Derive.Elim
