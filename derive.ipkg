@@ -5,4 +5,4 @@ package derive
 
 opts = "-p contrib"
 sourcedir = src
-modules = Derive.Disjoint, Derive.Kit, Derive.Injective, Derive.Elim, Derive.ElimTest
+modules = Derive.Disjoint, Derive.Kit, Derive.Injective, Derive.Elim, Derive.ElimTest, Derive.Eq
