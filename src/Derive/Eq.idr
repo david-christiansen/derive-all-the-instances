@@ -39,6 +39,7 @@ declareEq fam eq info =
     mkArg n t = MkFunArg n t Explicit NotErased
 
 
+
 ||| Make the matching clause for a single constructor
 ctorClause : (fam, eq : TTName) -> (info : TyConInfo) ->
              (c : (TTName, List CtorArg, Raw)) -> Elab FunClause
@@ -102,11 +103,6 @@ ctorClause fam eq info ctor =
         mkArgHole (CtorParameter _) = return ()
         mkArgHole (CtorField arg) = do claim (argName arg) (argTy arg)
                                        unfocus (argName arg)
-
-        unsafeNth : Nat -> List a -> Elab a
-        unsafeNth _     []        = fail [TextPart "Ran out of list elements"]
-        unsafeNth Z     (x :: _)  = return x
-        unsafeNth (S k) (_ :: xs) = unsafeNth k xs
 
         ctorFunArg : CtorArg -> FunArg
         ctorFunArg (CtorParameter a) = a
@@ -174,24 +170,126 @@ catchall eq info =
                 solve
       return $ MkFunClause (bindPats pvars lhs) !(forgetTypes (fst rhs))
 
-deriveEq : (fam, eq : TTName) -> Elab ()
-deriveEq fam eq =
-  do datatype <- lookupDatatypeExact fam
+deriveEq : (fam : TTName) -> Elab ()
+deriveEq fam =
+  do eq <- flip NS !currentNamespace <$> gensym "equalsImpl"
+     datatype <- lookupDatatypeExact fam
      info <- getTyConInfo (tyConArgs datatype) (tyConRes datatype)
      decl <- declareEq fam eq info
      declareType decl
+     let instn = NS (SN $ InstanceN `{Classes.Eq} [show fam]) !currentNamespace
+     instConstrs <- Foldable.concat <$>
+                    traverse (\ param => 
+                                case param of
+                                  (n, RType) => do constrn <- gensym "instarg"
+                                                   return [MkFunArg constrn
+                                                                    `(Eq ~(Var n) : Type)
+                                                                    Constraint
+                                                                    NotErased]
+                                  _ => return [])
+                             (getParams info)
+     let instArgs = map tcFunArg (args info)
+     let instRes = RApp (Var `{Classes.Eq})
+                        (mkApp (Var fam)
+                               (map (Var . tcArgName) (args info)))
+     declareType $ Declare instn (instArgs ++ instConstrs) instRes
+
      clauses <- traverse (ctorClause fam eq info) (constructors datatype)
      defineFunction $ DefineFun eq (clauses ++ [!(catchall eq info)])
-     -- TODO: build instance dict
+     defineFunction $
+       DefineFun instn !(instClause eq fam instn info instArgs instConstrs)
+     addInstance `{Classes.Eq} instn
      return ()
 
+  where tcArgName : TyConArg -> TTName
+        tcArgName (TyConParameter x) = argName x
+        tcArgName (TyConIndex x) = argName x
 
--- Can't derive Eq for this one!
-data SimpleFun a b = MkSimpleFun (a -> b)
+        tcFunArg : TyConArg -> FunArg
+        tcFunArg (TyConParameter x) = record {plicity = Implicit} x
+        tcFunArg (TyConIndex x) = record {plicity = Implicit} x
+        
+        instClause : (eq, fam, instn : TTName) ->
+                     (info : TyConInfo) ->
+                     (instArgs, instConstrs : List FunArg) ->
+                     Elab (List FunClause)
+        instClause eq fam instn info instArgs instConstrs =
+          do let baseCtorN = SN (InstanceCtorN `{Classes.Eq})
+             (ctorN, _, _) <- lookupTyExact baseCtorN
+             (pat, patTy) <- runElab `(Sigma Type id) $
+                                do th <- newHole "finalTy" `(Type)
+                                   patH <- newHole "pattern" (Var th)
+                                   fill `(MkSigma ~(Var th) ~(Var patH) : Sigma Type id)
+                                   solve
+                                   focus patH
+
+                                   apply (Var instn)
+                                         (replicate (length instArgs +
+                                                     length instConstrs)
+                                                    (True, 0))
+                                   solve
+                                   hs <- getHoles
+                                   traverse_ (\arg => do focus arg
+                                                         patvar arg)
+                                             hs
+
+             let (pvars, sigma) = extractBinders !(forgetTypes pat)
+             (rhsTy, lhs) <- getSigmaArgs sigma
+             rhs <- runElab (bindPatTys pvars rhsTy) $
+                      do (repeatUntilFail bindPat <|> return ())
+                         [(_, a), (_, b), (_, c)] <- apply (Var ctorN) (replicate 3 (True, 0))
+                         solve
+                         focus b; callEq (return ())
+                         focus c
+                         callEq $ do [(_, notArg)] <- apply `(not) [(True, 0)]
+                                     solve
+                                     focus notArg
+                         -- the only holes left are the constraint dicts
+                         traverse_ (\h => focus h *> resolveTC instn) !getHoles
+
+             realRhs <- forgetTypes (fst rhs)
+             return $ [MkFunClause (bindPats pvars lhs) realRhs]
+
+           where callEq : Elab () -> Elab ()
+                 callEq transform =
+                   do x <- gensym "methArg"
+                      y <- gensym "methArg"
+                      attack; intro (Just x)
+                      attack; intro (Just y)
+                      transform
+                      argHs <- apply (Var eq)
+                                 (replicate (2 * length (getParams info) +
+                                             2 * length (getIndices info) +
+                                             2) (True, 0))
+                      focus (snd !(unsafeNth (2 * length (getParams info) +
+                                              length (getIndices info))
+                                             argHs))
+                      apply (Var x) []; solve
+                      focus (snd !(unsafeNth (2 * length (getParams info) +
+                                              2 * length (getIndices info) + 1)
+                                             argHs))
+                      apply (Var y) []; solve
+                      solve; solve -- attacks
+                      solve -- the hole
+
+
+namespace TestDecls
+  -- Can't derive Eq for this one!
+  data SimpleFun a b = MkSimpleFun (a -> b)
+
+  data MyNat = MyZ | MyS MyNat
+
+  data MyList a = Nil | (::) a (MyList a)
+
+  namespace V
+    data MyVect : MyNat -> Type -> Type where
+      Nil : MyVect MyZ a
+      (::) : a -> MyVect n a -> MyVect (MyS n) a
 
 foreffect : ()
-foreffect = %runElab (do deriveEq `{Vect} (NS (UN "heya") ["Eq", "Derive"])
-                         deriveEq `{List} (UN "hlkj")
-                         deriveEq `{Elem} (UN "lkjlkj")
+foreffect = %runElab (do --deriveEq `{SimpleFun}
+                         deriveEq `{MyNat}
+                         deriveEq `{MyList}
+                         deriveEq `{MyVect}
                          search)
  

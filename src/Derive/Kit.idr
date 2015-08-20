@@ -47,6 +47,11 @@ isRType : Raw -> Bool
 isRType RType = True
 isRType _ = False
 
+unsafeNth : Nat -> List a -> Elab a
+unsafeNth _     []        = fail [TextPart "Ran out of list elements"]
+unsafeNth Z     (x :: _)  = return x
+unsafeNth (S k) (_ :: xs) = unsafeNth k xs
+
 
 ||| Generate a unique name (using `gensym`) that looks like some
 ||| previous name, for ease of debugging code generators.
