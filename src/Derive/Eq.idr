@@ -7,6 +7,7 @@ import Language.Reflection.Utils
 import Derive.Util.TyConInfo
 import Derive.Kit
 
+%access private
 
 declareEq : (fam, eq : TTName) -> (info : TyConInfo) -> Elab TyDecl
 declareEq fam eq info =
@@ -113,10 +114,10 @@ ctorClause fam eq info ctor =
                             solve
                             focus next
                             checkEq args
-          where 
+          where
                 checkArg : Elab ()
                 checkArg = if headVar (argTy a1) == Just fam
-                             then do hs <- apply (mkApp (Var eq) (map (Var . fst) (getParams info))) 
+                             then do hs <- apply (mkApp (Var eq) (map (Var . fst) (getParams info)))
                                                  (replicate (length (getParams info) + 2 + 2 * (length (getIndices info)))
                                                             (True, 0))
                                      solve
@@ -150,6 +151,60 @@ catchall eq info =
      (do fill `(False)
          solve)
 
+instClause : (eq, instn : TTName) ->
+             (info : TyConInfo) ->
+             (instArgs, instConstrs : List FunArg) ->
+             Elab (List FunClause)
+instClause eq instn info instArgs instConstrs =
+  do let baseCtorN = SN (InstanceCtorN `{Classes.Eq})
+     (ctorN, _, _) <- lookupTyExact baseCtorN
+     clause <- elabPatternClause
+                 (do apply (Var instn)
+                           (replicate (length instArgs +
+                                       length instConstrs)
+                                      (True, 0))
+                     solve)
+                 (do [(_, a), (_, b), (_, c)] <- apply (Var ctorN) [(True, 0), (False, 0), (False, 0)]
+                     solve
+                     focus b; callEq (return ())
+                     focus c
+                     callEq $ do [(_, notArg)] <- apply `(not) [(True, 0)]
+                                 solve
+                                 focus notArg
+                     -- the only holes left are the constraint dicts
+                     traverse_ (\h => focus h *> resolveTC instn) !getHoles)
+     return [clause]
+
+   where
+
+     ||| Fill the holes in the instance constructor with appropriately
+     ||| abstracted calls to the underlying implementation. Before
+     ||| calling, a script is run to prepare the hole underneath the
+     ||| lambdas (e.g. by wrapping it in `not`)
+     callEq : Elab () -> Elab ()
+     callEq transform =
+       do x <- gensym "methArg"
+          y <- gensym "methArg"
+          attack; intro (Just x)
+          attack; intro (Just y)
+          transform
+          argHs <- apply (Var eq)
+                     (replicate (2 * length (getParams info) +
+                                 2 * length (getIndices info) +
+                                 2) (True, 0))
+          focus (snd !(unsafeNth (2 * length (getParams info) +
+                                  length (getIndices info))
+                                 argHs))
+          apply (Var x) []; solve
+          focus (snd !(unsafeNth (2 * length (getParams info) +
+                                  2 * length (getIndices info) + 1)
+                                 argHs))
+          apply (Var y) []; solve
+          solve; solve -- attacks
+          solve -- the hole
+
+
+abstract
 deriveEq : (fam : TTName) -> Elab ()
 deriveEq fam =
   do eq <- flip NS !currentNamespace <$> gensym "equalsImpl"
@@ -159,7 +214,7 @@ deriveEq fam =
      declareType decl
      let instn = NS (SN $ InstanceN `{Classes.Eq} [show fam]) !currentNamespace
      instConstrs <- Foldable.concat <$>
-                    traverse (\ param => 
+                    traverse (\ param =>
                                 case param of
                                   (n, RType) => do constrn <- gensym "instarg"
                                                    return [MkFunArg constrn
@@ -177,7 +232,7 @@ deriveEq fam =
      clauses <- traverse (ctorClause fam eq info) (constructors datatype)
      defineFunction $ DefineFun eq (clauses ++ [!(catchall eq info)])
      defineFunction $
-       DefineFun instn !(instClause eq fam instn info instArgs instConstrs)
+       DefineFun instn !(instClause eq instn info instArgs instConstrs)
      addInstance `{Classes.Eq} instn
      return ()
 
@@ -188,52 +243,7 @@ deriveEq fam =
         tcFunArg : TyConArg -> FunArg
         tcFunArg (TyConParameter x) = record {plicity = Implicit} x
         tcFunArg (TyConIndex x) = record {plicity = Implicit} x
-        
-        instClause : (eq, fam, instn : TTName) ->
-                     (info : TyConInfo) ->
-                     (instArgs, instConstrs : List FunArg) ->
-                     Elab (List FunClause)
-        instClause eq fam instn info instArgs instConstrs =
-          do let baseCtorN = SN (InstanceCtorN `{Classes.Eq})
-             (ctorN, _, _) <- lookupTyExact baseCtorN
-             clause <- elabPatternClause
-                         (do apply (Var instn)
-                                   (replicate (length instArgs +
-                                               length instConstrs)
-                                              (True, 0))
-                             solve)
-                         (do [(_, a), (_, b), (_, c)] <- apply (Var ctorN) [(True, 0), (False, 0), (False, 0)]
-                             solve
-                             focus b; callEq (return ())
-                             focus c
-                             callEq $ do [(_, notArg)] <- apply `(not) [(True, 0)]
-                                         solve
-                                         focus notArg
-                             -- the only holes left are the constraint dicts
-                             traverse_ (\h => focus h *> resolveTC instn) !getHoles)
-             return [clause]
 
-           where callEq : Elab () -> Elab ()
-                 callEq transform =
-                   do x <- gensym "methArg"
-                      y <- gensym "methArg"
-                      attack; intro (Just x)
-                      attack; intro (Just y)
-                      transform
-                      argHs <- apply (Var eq)
-                                 (replicate (2 * length (getParams info) +
-                                             2 * length (getIndices info) +
-                                             2) (True, 0))
-                      focus (snd !(unsafeNth (2 * length (getParams info) +
-                                              length (getIndices info))
-                                             argHs))
-                      apply (Var x) []; solve
-                      focus (snd !(unsafeNth (2 * length (getParams info) +
-                                              2 * length (getIndices info) + 1)
-                                             argHs))
-                      apply (Var y) []; solve
-                      solve; solve -- attacks
-                      solve -- the hole
 
 
 namespace TestDecls
@@ -252,7 +262,7 @@ namespace TestDecls
   -- All elements of this should be Eq, because it's for runtime and the Nat is erased
   data CompileTimeNat : Type where
     MkCTN : .(n : Nat) -> CompileTimeNat
-  
+
 
 foreffect : ()
 foreffect = %runElab (do --deriveEq `{SimpleFun}

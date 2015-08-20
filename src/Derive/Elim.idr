@@ -253,7 +253,7 @@ getElimClauses info elimn ctors =
 instance Show FunClause where
   show (MkFunClause x y) = "(MkFunClause " ++ show x ++ " " ++ show y ++ ")"
 
-public
+abstract
 deriveElim : (tyn, elimn : TTName) -> Elab ()
 deriveElim tyn elimn =
   do -- Begin with some basic sanity checking
