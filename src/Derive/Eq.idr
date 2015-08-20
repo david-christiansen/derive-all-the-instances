@@ -7,6 +7,7 @@ import Language.Reflection.Utils
 import Derive.Util.TyConInfo
 import Derive.Kit
 
+
 declareEq : (fam, eq : TTName) -> (info : TyConInfo) -> Elab TyDecl
 declareEq fam eq info =
     do let paramArgs = map (\(n, t) => MkFunArg n t Implicit NotErased) (getParams info)
@@ -48,55 +49,39 @@ ctorClause fam eq info ctor =
      -- Begin by making non-param names unique (so we can use them for holes as well)
     (cn1, ctorArgs1, resTy1) <- processCtorArgs info ctor
     (cn2, ctorArgs2, resTy2) <- processCtorArgs info ctor
+    elabPatternClause
+      (do -- First give consistent bindings to the parameters
+          traverse {b=()} (\(n, ty) => do claim n ty ; unfocus n) (getParams info)
+          -- Next create holes for arguments - do indices, then a hole for each actual arg
+          -- Now make holes for non-param args
+          traverse mkArgHole ctorArgs1
+          traverse mkArgHole ctorArgs2
+          -- Now make holes for the arguments themselves
+          arg1 <- newHole "arg1" resTy1
+          arg2 <- newHole "arg2" resTy2
+          -- Now apply ==, with holes for its args that we will fill with these ones. Most will be solved through unification, but not all.
+          holes' <- apply (mkApp (Var eq) (map (Var . fst) (getParams info)))
+                          (replicate (length (getParams info) + 2 +
+                                      2 * length (getIndices info))
+                                     (True, 0))
+          solve
+          -- We can find the argument positions by counting
+          -- holes. Drop the constraints and indices, then take
+          -- an arg, then drop the indices again, then take an
+          -- arg
+          focus (snd !(unsafeNth (length (getParams info) + (length (getIndices info))) holes'))
+          apply (Var arg1) []; solve
+          focus (snd !(unsafeNth (1 + length (getParams info) + 2 * (length (getIndices info))) holes'))
+          apply (Var arg2) []; solve
 
-    pat <- runElab `(Sigma Type id) $
-             do th <- newHole "finalTy" `(Type)
-                patH <- newHole "pattern" (Var th)
-                fill `(MkSigma ~(Var th) ~(Var patH) : Sigma Type id)
-                solve
-                focus patH
-                -- First give consistent bindings to the parameters
-                traverse {b=()} (\(n, ty) => do claim n ty ; unfocus n) (getParams info)
-                -- Next create holes for arguments - do indices, then a hole for each actual arg
-                -- Now make holes for non-param args
-                traverse mkArgHole ctorArgs1
-                traverse mkArgHole ctorArgs2
-                -- Now make holes for the arguments themselves
-                arg1 <- newHole "arg1" resTy1
-                arg2 <- newHole "arg2" resTy2
-                -- Now apply ==, with holes for its args that we will fill with these ones. Most will be solved through unification, but not all.
-                holes' <- apply (mkApp (Var eq) (map (Var . fst) (getParams info)))
-                                (replicate (length (getParams info) + 2 +
-                                            2 * length (getIndices info))
-                                           (True, 0))
-                -- We can find the argument positions by counting
-                -- holes. Drop the constraints and indices, then take
-                -- an arg, then drop the indices again, then take an
-                -- arg
-                focus (snd !(unsafeNth (length (getParams info) + (length (getIndices info))) holes'))
-                apply (Var arg1) []; solve
-                focus (snd !(unsafeNth (1 + length (getParams info) + 2 * (length (getIndices info))) holes'))
-                apply (Var arg2) []; solve
-
-                -- Now we get the actual arguments in place
-                focus arg1
-                apply (mkApp (Var cn1) (map (Var . argName . ctorFunArg) ctorArgs1)) []
-                solve
-                focus arg2
-                apply (mkApp (Var cn2) (map (Var . argName . ctorFunArg) ctorArgs2)) []
-                solve
-
-                solve -- the pattern hole
-                -- Turn all remaining holes except patH into pattern variables
-                traverse_ {b=()} (\h => focus h *> patvar h) !getHoles
-
-    let (pvars, sigma) = extractBinders !(forgetTypes (fst pat))
-    (_, lhs) <- getSigmaArgs sigma
-    rhs <- runElab (bindPatTys pvars `(Bool)) $
-             do (repeatUntilFail bindPat <|> return ())
-                checkEq (zip ctorArgs1 ctorArgs2)
-    realRhs <- forgetTypes (fst rhs)
-    return $ MkFunClause (bindPats pvars lhs) realRhs
+          -- Now we get the actual arguments in place
+          focus arg1
+          apply (mkApp (Var cn1) (map (Var . argName . ctorFunArg) ctorArgs1)) []
+          solve
+          focus arg2
+          apply (mkApp (Var cn2) (map (Var . argName . ctorFunArg) ctorArgs2)) []
+          solve)
+      (checkEq (zip ctorArgs1 ctorArgs2))
 
 
   where mkArgHole : CtorArg -> Elab ()
@@ -117,7 +102,7 @@ ctorClause fam eq info ctor =
             NotErased =>
               if isRType (argTy a1) then checkEq args
                 else
-                         do [here, todo] <- apply (Var (NS (UN "&&") ["Bool", "Prelude"]))
+                         do [here, todo] <- apply (Var `{(&&)})
                                                   [(False, 0), (False, 0)]
                             solve
                             focus (snd here)
@@ -159,16 +144,11 @@ ctorClause fam eq info ctor =
 
 catchall : (eq : TTName) -> (info : TyConInfo) -> Elab FunClause
 catchall eq info =
-   do pat <- runElab `(Bool) $
-               do apply (Var eq) (replicate (2 * length (args info) + 2) (False, 0))
-                  solve
-                  traverse_ {b=()} (\h => focus h *> patvar h) !getHoles
-      let (pvars, lhs) = extractBinders !(forgetTypes (fst pat))
-      rhs <- runElab (bindPatTys pvars `(Bool)) $
-             do (repeatUntilFail bindPat <|> return ())
-                fill `(False)
-                solve
-      return $ MkFunClause (bindPats pvars lhs) !(forgetTypes (fst rhs))
+   elabPatternClause
+     (do apply (Var eq) (replicate (2 * length (args info) + 2) (False, 0))
+         solve)
+     (do fill `(False)
+         solve)
 
 deriveEq : (fam : TTName) -> Elab ()
 deriveEq fam =
@@ -216,39 +196,22 @@ deriveEq fam =
         instClause eq fam instn info instArgs instConstrs =
           do let baseCtorN = SN (InstanceCtorN `{Classes.Eq})
              (ctorN, _, _) <- lookupTyExact baseCtorN
-             (pat, patTy) <- runElab `(Sigma Type id) $
-                                do th <- newHole "finalTy" `(Type)
-                                   patH <- newHole "pattern" (Var th)
-                                   fill `(MkSigma ~(Var th) ~(Var patH) : Sigma Type id)
-                                   solve
-                                   focus patH
-
-                                   apply (Var instn)
-                                         (replicate (length instArgs +
-                                                     length instConstrs)
-                                                    (True, 0))
-                                   solve
-                                   hs <- getHoles
-                                   traverse_ (\arg => do focus arg
-                                                         patvar arg)
-                                             hs
-
-             let (pvars, sigma) = extractBinders !(forgetTypes pat)
-             (rhsTy, lhs) <- getSigmaArgs sigma
-             rhs <- runElab (bindPatTys pvars rhsTy) $
-                      do (repeatUntilFail bindPat <|> return ())
-                         [(_, a), (_, b), (_, c)] <- apply (Var ctorN) (replicate 3 (True, 0))
-                         solve
-                         focus b; callEq (return ())
-                         focus c
-                         callEq $ do [(_, notArg)] <- apply `(not) [(True, 0)]
-                                     solve
-                                     focus notArg
-                         -- the only holes left are the constraint dicts
-                         traverse_ (\h => focus h *> resolveTC instn) !getHoles
-
-             realRhs <- forgetTypes (fst rhs)
-             return $ [MkFunClause (bindPats pvars lhs) realRhs]
+             clause <- elabPatternClause
+                         (do apply (Var instn)
+                                   (replicate (length instArgs +
+                                               length instConstrs)
+                                              (True, 0))
+                             solve)
+                         (do [(_, a), (_, b), (_, c)] <- apply (Var ctorN) [(True, 0), (False, 0), (False, 0)]
+                             solve
+                             focus b; callEq (return ())
+                             focus c
+                             callEq $ do [(_, notArg)] <- apply `(not) [(True, 0)]
+                                         solve
+                                         focus notArg
+                             -- the only holes left are the constraint dicts
+                             traverse_ (\h => focus h *> resolveTC instn) !getHoles)
+             return [clause]
 
            where callEq : Elab () -> Elab ()
                  callEq transform =
@@ -286,11 +249,17 @@ namespace TestDecls
       Nil : MyVect MyZ a
       (::) : a -> MyVect n a -> MyVect (MyS n) a
 
+  -- All elements of this should be Eq, because it's for runtime and the Nat is erased
+  data CompileTimeNat : Type where
+    MkCTN : .(n : Nat) -> CompileTimeNat
+  
+
 foreffect : ()
 foreffect = %runElab (do --deriveEq `{SimpleFun}
                          deriveEq `{MyNat}
                          deriveEq `{MyList}
                          deriveEq `{MyVect}
+                         deriveEq `{CompileTimeNat}
                          search)
 
 myNatEqRefl : (n : MyNat) -> n == n = True
@@ -305,3 +274,6 @@ myNatListEqRefl (x :: xs) with (myNatEqRefl x)
     myNatListEqRefl (x :: xs) | headEq | tailEq = rewrite headEq in
                                                   rewrite tailEq in
                                                   Refl
+
+ctnEqTrivial : (j, k : CompileTimeNat) -> j == k = True
+ctnEqTrivial (MkCTN _) (MkCTN _) = Refl

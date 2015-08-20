@@ -256,6 +256,43 @@ namespace Tactics
                                          (n' ::) <$> go body
           go _ = return []
 
+||| Helper for elaborating pattern clauses. This helper takes care of
+||| inferring the type of the left-hand side and bringing that
+||| information onward to the right-hand side.
+|||
+||| While elaborating the left-hand side, the proof term contains a
+||| Sigma type. This is part of the type inference going on and will
+||| be removed.
+|||
+||| @ lhs the tactic script to establish the left-hand side of the
+|||       clause. It should cause an application of the term being
+|||       defined. Any holes left behind will be converted to pattern
+|||       variables with the same name.
+||| @ rhs the tactic script to establish the right side of the clause.
+|||       It will be run in a context where the pattern variables are
+|||       already bound, and should leave behind no holes.
+partial
+elabPatternClause : (lhs, rhs : Elab ()) -> Elab FunClause
+elabPatternClause lhs rhs =
+  do -- Elaborate the LHS in a context where its type will be solved via unification
+     (pat, _) <- runElab `(Sigma Type id) $
+                    do th <- newHole "finalTy" `(Type)
+                       patH <- newHole "pattern" (Var th)
+                       fill `(MkSigma ~(Var th) ~(Var patH) : Sigma Type id)
+                       solve
+                       focus patH
+                       lhs
+                       -- Convert all remaining holes to pattern variables
+                       traverse_ {b=()} (\h => focus h *> patvar h) !getHoles
+     let (pvars, sigma) = extractBinders !(forgetTypes pat)
+     (rhsTy, lhsTm) <- getSigmaArgs sigma
+     rhsTm <- runElab (bindPatTys pvars rhsTy) $
+                do -- Introduce all the pattern variables from the LHS
+                   repeatUntilFail bindPat <|> return ()
+                   rhs
+     realRhs <- forgetTypes (fst rhsTm)
+     return $ MkFunClause (bindPats pvars lhsTm) realRhs
+
 --TODO: move to prelude
 instance (Show a, Show b) => Show (Either a b) where
   show (Left x) = "(Left " ++ show x ++ ")"
