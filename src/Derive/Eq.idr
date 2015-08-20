@@ -292,4 +292,16 @@ foreffect = %runElab (do --deriveEq `{SimpleFun}
                          deriveEq `{MyList}
                          deriveEq `{MyVect}
                          search)
- 
+
+myNatEqRefl : (n : MyNat) -> n == n = True
+myNatEqRefl MyZ = Refl
+myNatEqRefl (MyS n') with (myNatEqRefl n')
+  myNatEqRefl (MyS n') | ih = rewrite ih in Refl
+
+myNatListEqRefl : (xs : MyList MyNat) -> xs == xs = True
+myNatListEqRefl [] = Refl
+myNatListEqRefl (x :: xs) with (myNatEqRefl x)
+  myNatListEqRefl (x :: xs) | headEq with (myNatListEqRefl xs)
+    myNatListEqRefl (x :: xs) | headEq | tailEq = rewrite headEq in
+                                                  rewrite tailEq in
+                                                  Refl
