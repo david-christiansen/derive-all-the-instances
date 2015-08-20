@@ -12,6 +12,11 @@ last [] = fail [TextPart "Unexpected empty list"]
 last [x] = return x
 last (_::x::xs) = last (x::xs)
 
+getSigmaArgs : Raw -> Elab (Raw, Raw)
+getSigmaArgs `(MkSigma {a=~_} {P=~_} ~rhsTy ~lhs) = return (rhsTy, lhs)
+getSigmaArgs arg = fail [TextPart "Not a sigma constructor"]
+
+
 ||| Ensure that all of a collection of holes was properly solved, to
 ||| sanity-check a use of `apply`
 allSolved : List TTName -> Elab ()
@@ -37,6 +42,11 @@ assoc x ((y, z)::ys) = if x == y then return z else assoc x ys
 doTimes : Applicative m => (n : Nat) -> m a -> m (Vect n a)
 doTimes Z x = pure []
 doTimes (S k) x = [| x :: (doTimes k x) |]
+
+isRType : Raw -> Bool
+isRType RType = True
+isRType _ = False
+
 
 ||| Generate a unique name (using `gensym`) that looks like some
 ||| previous name, for ease of debugging code generators.

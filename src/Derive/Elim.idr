@@ -10,6 +10,8 @@ import Language.Reflection.Elab
 import Language.Reflection.Utils
 import Derive.TestDefs
 
+%access private
+
 bindParams : TyConInfo -> Elab ()
 bindParams info = traverse_ (uncurry forall) (getParams info)
 
@@ -128,10 +130,6 @@ getElimTy info ctors =
                 solve
      forgetTypes (fst ty)
 
-
-getSigmaArgs : Raw -> Elab (Raw, Raw)
-getSigmaArgs `(MkSigma {a=~_} {P=~_} ~rhsTy ~lhs) = return (rhsTy, lhs)
-getSigmaArgs arg = fail [TextPart "Not a sigma constructor"]
 
 
 data ElimArg = IHArgument TTName | NormalArgument TTName
@@ -275,6 +273,7 @@ getElimClauses info elimn ctors =
 instance Show FunClause where
   show (MkFunClause x y) = "(MkFunClause " ++ show x ++ " " ++ show y ++ ")"
 
+public
 deriveElim : (tyn, elimn : TTName) -> Elab ()
 deriveElim tyn elimn =
   do -- Begin with some basic sanity checking
