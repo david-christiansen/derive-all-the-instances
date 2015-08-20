@@ -141,125 +141,105 @@ instance Show ElimArg where
 getElimClause : TyConInfo -> (elimn : TTName) -> (methCount : Nat) ->
                 (TTName, List CtorArg, Raw) -> Nat -> Elab FunClause
 getElimClause info elimn methCount (cn, args, resTy) whichCon =
-  do pat <- runElab `(Sigma Type id) $
-              do -- First set up the machinery to infer the type of the LHS
-                 th <- newHole "finalTy" `(Type)
-                 patH <- newHole "pattern" (Var th)
-                 fill `(MkSigma {a=Type} {P=id} ~(Var th) ~(Var patH))
-                 solve
-                 focus patH
+  elabPatternClause
+    (do -- Establish a hole for each parameter
+        traverse {b=()} (\(n, ty) => do claim n ty
+                                        unfocus n)
+                 (getParams info)
 
-                 -- Establish a hole for each parameter
-                 traverse {b=()} (\(n, ty) => do claim n ty
-                                                 unfocus n)
-                          (getParams info)
+        -- Establish a hole for each argument to the constructor
+        traverse {b=()} (\arg => case arg of
+                                   CtorParameter _ => return ()
+                                   CtorField arg => do claim (argName arg) (argTy arg)
+                                                       unfocus (argName arg))
+          args
 
-                 -- Establish a hole for each argument to the constructor
-                 traverse {b=()} (\arg => case arg of
-                                            CtorParameter _ => return ()
-                                            CtorField arg => do claim (argName arg) (argTy arg)
-                                                                unfocus (argName arg))
-                   args
-
-                 -- Establish a hole for the scrutinee (infer type)
-                 scrutinee <- newHole "scrutinee" resTy
+        -- Establish a hole for the scrutinee (infer type)
+        scrutinee <- newHole "scrutinee" resTy
 
 
-                 -- Apply the eliminator to the proper holes
-                 let paramApp : Raw = mkApp (Var elimn) $
-                                      map (Var . fst) (getParams info)
+        -- Apply the eliminator to the proper holes
+        let paramApp : Raw = mkApp (Var elimn) $
+                             map (Var . fst) (getParams info)
 
-                 -- We leave the RHS with a function type: motive -> method* -> res
-                 -- to make it easier to map methods to constructors
-                 holes <- apply paramApp (replicate (length (getIndices info))
-                                                    (True, 0) ++
-                                          [(False, 1)])
-                 scr <- snd <$> last holes
-                 focus scr; fill (Var scrutinee); solve
-                 solve
+        -- We leave the RHS with a function type: motive -> method* -> res
+        -- to make it easier to map methods to constructors
+        holes <- apply paramApp (replicate (length (getIndices info))
+                                           (True, 0) ++
+                                 [(False, 1)])
+        scr <- snd <$> last holes
+        focus scr; fill (Var scrutinee); solve
+        solve
 
-                 -- Fill the scrutinee with the concrete constructor pattern
-                 focus scrutinee
-                 apply (mkApp (Var cn) $
-                          map (\x => case x of
-                                       CtorParameter param => Var (argName param)
-                                       CtorField arg => Var (argName arg))
-                              args)
-                       []
-                 solve
+        -- Fill the scrutinee with the concrete constructor pattern
+        focus scrutinee
+        apply (mkApp (Var cn) $
+                 map (\x => case x of
+                              CtorParameter param => Var (argName param)
+                              CtorField arg => Var (argName arg))
+                     args)
+              []
+        solve)
+    (do motiveN <- gensym "motive"
+        intro (Just motiveN)
+        prevMethods <- doTimes whichCon intro1
+        methN <- gensym "useThisMethod"
+        intro (Just methN)
+        nextMethods <- intros
 
-                 -- Turn all remaining holes into pattern variables
-                 -- traverse {b=()} (\(h, t) => do focus h ; patvar h)
-                 --          (getParams info)
-                 traverse {b=()} (\h => do focus h ; patvar h) !getHoles
+        argSpec <- Foldable.concat <$>
+                     traverse (\x => case x of
+                                       CtorParameter _ => return List.Nil
+                                       CtorField arg =>
+                                         do let n = argName arg
+                                            let t = argTy arg
+                                            (argArgs, argRes) <- stealBindings t (const Nothing)
+                                            if headsMatch argRes (result info) --recursive
+                                              then return [ NormalArgument n
+                                                          , IHArgument n
+                                                          ]
+                                              else return [NormalArgument n])
+                              args
 
-                 return ()
+        argHs <- apply (Var methN) (replicate (List.length argSpec) (True, 0))
+        solve
 
-     let (pvars, sigma) = extractBinders !(forgetTypes (fst pat))
-     (rhsTy, lhs) <- getSigmaArgs sigma
-     rhs <- runElab (bindPatTys pvars rhsTy) $
-              do (repeatUntilFail bindPat <|> return ())
-                 motiveN <- gensym "motive"
-                 intro (Just motiveN)
-                 prevMethods <- doTimes whichCon intro1
-                 methN <- gensym "useThisMethod"
-                 intro (Just methN)
-                 nextMethods <- intros
+        -- Now build the recursive calls for the induction hypotheses
+        traverse_ {a=(ElimArg, TTName)} {b=()}
+                 (\(spec, nh) => case spec of
+                          NormalArgument n => do focus nh
+                                                 apply (Var n) []
+                                                 solve
+                          IHArgument n =>
+                            do focus nh
+                               attack
+                               local <- intros
+                               ihHs <- apply (Var elimn) $
+                                 replicate (length (TyConInfo.args info)) (True, 0) ++
+                                 [(False, 1)] ++
+                                 replicate (S methCount) (True, 0)
+                               solve -- application
 
-                 argSpec <- Foldable.concat <$>
-                              traverse (\x => case x of
-                                                CtorParameter _ => return List.Nil
-                                                CtorField arg =>
-                                                  do let n = argName arg
-                                                     let t = argTy arg
-                                                     (argArgs, argRes) <- stealBindings t (const Nothing)
-                                                     if headsMatch argRes (result info) --recursive
-                                                       then return [ NormalArgument n
-                                                                   , IHArgument n
-                                                                   ]
-                                                       else return [NormalArgument n])
-                                       args
+                               let (arg::motive::methods) = map snd $ drop (length (TyConInfo.args info)) ihHs
+                               focus arg
 
-                 argHs <- apply (Var methN) (replicate (List.length argSpec) (True, 0))
-                 solve
-
-                 -- Now build the recursive calls for the induction hypotheses
-                 traverse {a=(ElimArg, TTName)} {b=()}
-                          (\(spec, nh) => case spec of
-                                   NormalArgument n => do focus nh
-                                                          apply (Var n) []
-                                                          solve
-                                   IHArgument n =>
-                                     do focus nh
-                                        attack
-                                        local <- intros
-                                        ihHs <- apply (Var elimn) $
-                                          replicate (length (TyConInfo.args info)) (True, 0) ++
-                                          [(False, 1)] ++
-                                          replicate (S methCount) (True, 0)
-                                        solve -- application
-
-                                        let (arg::motive::methods) = map snd $ drop (length (TyConInfo.args info)) ihHs
-                                        focus arg
-
-                                        apply (mkApp (Var n) (map Var local)) []; solve
-                                        solve -- attack
+                               apply (mkApp (Var n) (map Var local)) []; solve
+                               solve -- attack
 
 
-                                        focus motive; fill (Var motiveN); solve
-                                        let methodArgs = toList prevMethods ++ [methN] ++ nextMethods
-                                        remaining <- zipH methods methodArgs
+                               focus motive; fill (Var motiveN); solve
+                               let methodArgs = toList prevMethods ++ [methN] ++ nextMethods
+                               remaining <- zipH methods methodArgs
 
-                                        traverse_ {b=()}
-                                                  (\todo =>
-                                                    do focus (fst todo)
-                                                       fill (Var (snd todo))
-                                                       solve)
-                                                  remaining)
-                          !(zipH argSpec (map snd argHs))
-                 return ()
-     realRhs <- forgetTypes (fst rhs)
-     return $ MkFunClause (bindPats pvars lhs) realRhs
+                               traverse_ {b=()}
+                                         (\todo =>
+                                           do focus (fst todo)
+                                              fill (Var (snd todo))
+                                              solve)
+                                         remaining)
+                 !(zipH argSpec (map snd argHs)))
+
+
   where bindLam : List (TTName, Binder Raw) -> Raw -> Raw
         bindLam [] x = x
         bindLam ((n, b)::rest) x = RBind n (Lam (getBinderTy b)) $ bindLam rest x
