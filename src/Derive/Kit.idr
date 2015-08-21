@@ -7,6 +7,14 @@ import Language.Reflection.Utils
 
 %default total
 
+||| Run something for effects, throwing away the return value
+ignore : Functor f => f a -> f ()
+ignore x = map (const ()) x
+
+||| Do nothing
+skip : Applicative f => f ()
+skip = pure ()
+
 last : List a -> Elab a
 last [] = fail [TextPart "Unexpected empty list"]
 last [x] = return x

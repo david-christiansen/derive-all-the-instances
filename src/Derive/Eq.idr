@@ -9,6 +9,7 @@ import Derive.Kit
 
 %access private
 
+||| Declare the underlying == function
 declareEq : (fam, eq : TTName) -> (info : TyConInfo) -> Elab TyDecl
 declareEq fam eq info =
     do let paramArgs = map (\(n, t) => MkFunArg n t Implicit NotErased) (getParams info)
@@ -151,6 +152,16 @@ catchall eq info =
      (do fill `(False)
          solve)
 
+||| Generate the single pattern-match clause for the underlying
+||| dictionary object. This clause will take all the arguments to the
+||| type constructor as implicit arguments, and it will have access to
+||| Eq on each parameter type as a constraint. The right-hand side
+||| then returns a dictionary.
+|||
+||| @ eq the name of the underlying == implementation
+||| @ instn the name to be used for the dictionary object
+||| @ info a description of the type constructors
+||| @ instArgs the arguments 
 instClause : (eq, instn : TTName) ->
              (info : TyConInfo) ->
              (instArgs, instConstrs : List FunArg) ->
