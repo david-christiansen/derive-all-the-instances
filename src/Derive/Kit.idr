@@ -202,6 +202,10 @@ namespace Tactics
                        unfocus hn
                        return hn
 
+  exact : Raw -> Elab ()
+  exact tm = do apply tm []
+                solve
+
   ||| A tactic for dispatching trivial goals, along with conjunctions
   ||| and disjunctions of these.
   partial
@@ -263,6 +267,14 @@ namespace Tactics
                                          intro (Just n')
                                          (n' ::) <$> go body
           go _ = return []
+
+
+  inHole : TTName -> Elab () -> Elab ()
+  inHole h todo =
+    if h `elem` !getHoles
+      then do focus h; todo
+      else skip
+
 
 ||| Helper for elaborating pattern clauses. This helper takes care of
 ||| inferring the type of the left-hand side and bringing that
