@@ -275,13 +275,10 @@ namespace TestDecls
     MkCTN : .(n : Nat) -> CompileTimeNat
 
 
-foreffect : ()
-foreffect = %runElab (do --deriveEq `{SimpleFun}
-                         deriveEq `{MyNat}
-                         deriveEq `{MyList}
-                         deriveEq `{MyVect}
-                         deriveEq `{CompileTimeNat}
-                         search)
+
+%runElab (traverse_ deriveEq $
+           with List [ `{MyNat}, {- `{SimpleFun}, -} `{MyList}, `{MyVect}, `{CompileTimeNat}])
+
 
 myNatEqRefl : (n : MyNat) -> n == n = True
 myNatEqRefl MyZ = Refl
