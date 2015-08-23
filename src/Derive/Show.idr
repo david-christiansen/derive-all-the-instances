@@ -105,27 +105,49 @@ ctorClause fam sh info ctor =
         ctorFunArg (CtorField a) = a
 
 
-        showOneArg : TTName -> Elab ()
-        showOneArg thisArgName =
+        showOneArg : FunArg -> Elab ()
+        showOneArg thisArg =
             do argHere <- newHole "thisArg" `(String)
                rest <- newHole "next" `(String)
                fill `(~(Var argHere) ++ ~(Var rest) : String)
                solve
                focus argHere
-               (do rec <- newHole "rec" `(String)
-                   fill `(" " ++ ~(Var rec) : String); solve
-                   focus rec
-                   fnArgs <- apply (Var sh) (replicate (2 + 2 * length (getParams info) + length (getIndices info)) (True, 0))
+               if headVar (argTy thisArg) == Just fam
+                 then recursiveCall
+                 else useShow
+               focus rest
+          where
+            recursiveCall : Elab ()
+            recursiveCall =
+                do -- recursive call to self with initial space
+                   afterSpace <- newHole "afterSpace" `(String)
+                   fill `(" " ++ ~(Var afterSpace)); solve
+                   focus afterSpace
+
+                   hs <- apply (mkApp (Var sh) (map (Var . fst) (getParams info)))
+                               (replicate (length (getParams info) +
+                                           length (getIndices info)
+                                           + 2)
+                                          (True, 0))
                    solve
-                   focus (snd !(last fnArgs)); fill (Var thisArgName);  solve
-                   traverse_ (\argHole => inHole (snd argHole) (exact `(App : Prec) <|> resolveTC sh)) fnArgs
-                   ) <|>
-                 (do with List [_, (_, constrH), (_, xH)] <- apply (Var `{showArg}) [(True, 0), (False, 0), (False, 0)]
-                     solve
-                     focus xH
-                     apply (Var thisArgName) []; solve
-                     focus constrH; resolveTC sh
-                     focus rest)
+                   -- TC dict arguments to recursive call should be threaded through
+                   traverse_
+                     (\h => do inHole (snd h) (resolveTC sh))
+                     (List.take (length (getParams info)) hs)
+                   prec <- snd <$> unsafeNth (length (getParams info)) hs
+                   focus prec; apply `(App : Prec) []; solve
+                   field <- snd <$> unsafeNth (1 + length (args info)) hs
+                   inHole field (apply (Var (argName thisArg)) [] *> solve)
+
+            useShow : Elab ()
+            useShow =
+                do -- call the real showArg
+                   [(_, tyH), (_, dictH), (_, xH)] <- apply (Var `{showArg}) [(True, 0), (True, 0), (True, 0)]
+                   solve
+                   focus xH; apply (Var (argName thisArg)) []; solve
+                   focus dictH; resolveTC sh
+
+
 
         hasArgsToShow : List CtorArg -> Bool
         hasArgsToShow [] = False
@@ -146,8 +168,8 @@ ctorClause fam sh info ctor =
                     do h <- newHole "next" `(String)
                        fill `(" _" ++ ~(Var h) : String); solve
                        focus h
-                showCtorArg' (MkFunArg argName _ Explicit NotErased) =
-                    showOneArg argName
+                showCtorArg' thisArg@(MkFunArg argName _ Explicit NotErased) =
+                    showOneArg thisArg
                 showCtorArg' _ = skip
 
 instClause : (sh, instn : TTName) ->
@@ -207,7 +229,7 @@ instClause sh instn info instArgs instConstrs =
 abstract
 deriveShow : (fam : TTName) -> Elab ()
 deriveShow fam =
-    do sh <- flip NS !currentNamespace <$> gensym "showPrecImpl"
+    do sh <- flip NS !currentNamespace . SN . MetaN fam <$> gensym "showImpl"
        datatype <- lookupDatatypeExact fam
        info <- getTyConInfo (tyConArgs datatype) (tyConRes datatype)
        decl <- declareShow fam sh info
@@ -260,10 +282,14 @@ namespace TestDecls
   data CompileTimeNat : Type where
     MkCTN : .(n : Nat) -> CompileTimeNat
 
-%runElab (traverse_ deriveShow $
-           with List [`{MyNat}, `{MyList}, `{MyVect}, `{CompileTimeNat}])
+decl syntax derive Show for {n} = %runElab (deriveShow `{n})
 
- 
+derive Show for MyNat
+derive Show for MyList
+derive Show for MyVect
+derive Show for CompileTimeNat
+
+
 namespace Tests
   test1 : show (with V [1,2,3]) = "(::) 1 ((::) 2 ((::) 3 Nil))"
   test1 = Refl

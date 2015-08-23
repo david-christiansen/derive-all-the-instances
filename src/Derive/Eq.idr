@@ -218,7 +218,7 @@ instClause eq instn info instArgs instConstrs =
 abstract
 deriveEq : (fam : TTName) -> Elab ()
 deriveEq fam =
-  do eq <- flip NS !currentNamespace <$> gensym "equalsImpl"
+  do eq <- flip NS !currentNamespace . SN . MetaN fam <$> gensym "equalsImpl"
      datatype <- lookupDatatypeExact fam
      info <- getTyConInfo (tyConArgs datatype) (tyConRes datatype)
      decl <- declareEq fam eq info
@@ -274,10 +274,14 @@ namespace TestDecls
   data CompileTimeNat : Type where
     MkCTN : .(n : Nat) -> CompileTimeNat
 
+decl syntax derive Eq for {n} = %runElab (deriveEq `{n})
+
+derive Eq for MyNat
+derive Eq for MyList
+derive Eq for MyVect
+derive Eq for CompileTimeNat
 
 
-%runElab (traverse_ deriveEq $
-           with List [ `{MyNat}, {- `{SimpleFun}, -} `{MyList}, `{MyVect}, `{CompileTimeNat}])
 
 
 myNatEqRefl : (n : MyNat) -> n == n = True
