@@ -253,7 +253,7 @@ namespace Tactics
   intro1 = do g <- snd <$> getGoal
               case g of
                 Bind n (Pi _ _) _ => do n' <- nameFrom n
-                                        intro (Just n')
+                                        intro n'
                                         return n'
                 _ => fail [ TextPart "Can't intro1 because goal"
                           , TermPart g
@@ -264,7 +264,7 @@ namespace Tactics
               go g
     where go : TT -> Elab (List TTName)
           go (Bind n (Pi _ _) body) = do n' <- nameFrom n
-                                         intro (Just n')
+                                         intro n'
                                          (n' ::) <$> go body
           go _ = return []
 
@@ -307,7 +307,7 @@ elabPatternClause lhs rhs =
      let (pvars, sigma) = extractBinders !(forgetTypes pat)
      (rhsTy, lhsTm) <- getSigmaArgs sigma
      rhsTm <- runElab (bindPatTys pvars rhsTy) $
-                do -- Introduce all the pattern variables from the LHS
+                                  do -- Introduce all the pattern variables from the LHS
                    repeatUntilFail bindPat <|> return ()
                    rhs
      realRhs <- forgetTypes (fst rhsTm)

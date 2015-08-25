@@ -192,7 +192,7 @@ instClause sh instn info instArgs instConstrs =
                      -- ty was solved by unification, if things are going right
                      focus showImpl
                      shArg <- gensym "x"
-                     attack; intro (Just shArg)
+                     attack; intro shArg
                      shPArgs <- apply (Var sh)
                                       (replicate (2 * length (getParams info) +
                                                   length (getIndices info) + 2)
@@ -206,8 +206,8 @@ instClause sh instn info instArgs instConstrs =
                      focus showPrecImpl
                      shPArgP <- gensym "d"
                      shPArgX <- gensym "x"
-                     attack; intro (Just shPArgP)
-                     attack; intro (Just shPArgX)
+                     attack; intro shPArgP
+                     attack; intro shPArgX
                      shPArgs' <- apply (Var sh)
                                        (replicate (2 * length (getParams info) +
                                                    length (getIndices info) + 2)

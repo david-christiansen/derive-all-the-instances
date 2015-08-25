@@ -196,8 +196,8 @@ instClause eq instn info instArgs instConstrs =
      callEq transform =
        do x <- gensym "methArg"
           y <- gensym "methArg"
-          attack; intro (Just x)
-          attack; intro (Just y)
+          attack; intro x
+          attack; intro y
           transform
           argHs <- apply (Var eq)
                      (replicate (2 * length (getParams info) +
@@ -275,6 +275,7 @@ namespace TestDecls
     MkCTN : .(n : Nat) -> CompileTimeNat
 
 decl syntax derive Eq for {n} = %runElab (deriveEq `{n})
+
 
 derive Eq for MyNat
 derive Eq for MyList
