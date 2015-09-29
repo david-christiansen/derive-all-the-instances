@@ -4,10 +4,16 @@ import Data.Vect
 
 import Language.Reflection.Elab
 import Language.Reflection.Utils
-import Derive.Util.TyConInfo
-import Derive.Kit
+import Pruviloj.Internals.TyConInfo
+import Pruviloj.Internals
+import Pruviloj.Core
 
 %access private
+
+isRType : Raw -> Bool
+isRType RType = True
+isRType _ = False
+
 
 ||| Declare the underlying == function
 declareEq : (fam, eq : TTName) -> (info : TyConInfo) -> Elab TyDecl
@@ -18,7 +24,7 @@ declareEq fam eq info =
                      (\(n, t) =>
                         do n' <- gensym "constrarg"
                            return $ MkFunArg n' `(Eq ~(Var n)) Constraint NotErased) $
-                     filter (isRType . snd) $
+                     List.filter (isRType . snd) $
                      getParams info
        arg1 <- applyTyCon (args info) (Var fam)
        arg2 <- applyTyCon (args info) (Var fam)
@@ -117,7 +123,7 @@ ctorClause fam eq info ctor =
                             checkEq args
           where
                 checkArg : Elab ()
-                checkArg = if headVar (argTy a1) == Just fam
+                checkArg = if headName (argTy a1) == Just fam
                              then do hs <- apply (mkApp (Var eq) (map (Var . fst) (getParams info)))
                                                  (replicate (length (getParams info) + 2 + 2 * (length (getIndices info)))
                                                             (True, 0))

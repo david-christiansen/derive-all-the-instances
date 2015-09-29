@@ -4,9 +4,16 @@ import Data.Vect
 
 import Language.Reflection.Elab
 import Language.Reflection.Utils
-import Derive.Kit
-import Derive.Util.TyConInfo
+import Pruviloj.Core
+import Pruviloj.Internals.TyConInfo
+import Pruviloj.Internals
+
 %access public
+
+isRType : Raw -> Bool
+isRType RType = True
+isRType _ = False
+
 
 
 declareShow : (fam, sh : TTName) -> TyConInfo -> Elab TyDecl
@@ -16,7 +23,7 @@ declareShow fam eq info =
                      (\(n, t) =>
                         do n' <- gensym "constrarg"
                            return $ MkFunArg n' `(Show ~(Var n)) Constraint NotErased) $
-                     filter (isRType . snd) $
+                     List.filter (isRType . snd) $
                      getParams info
      precn <- gensym "d"
      let precArg = with List [MkFunArg precn `(Prec) Explicit NotErased]
@@ -112,7 +119,7 @@ ctorClause fam sh info ctor =
                fill `(~(Var argHere) ++ ~(Var rest) : String)
                solve
                focus argHere
-               if headVar (argTy thisArg) == Just fam
+               if headName (argTy thisArg) == Just fam
                  then recursiveCall
                  else useShow
                focus rest
@@ -282,12 +289,17 @@ namespace TestDecls
   data CompileTimeNat : Type where
     MkCTN : .(n : Nat) -> CompileTimeNat
 
+
+  data Rose a = MkRose a (List (Rose a))
+-- TODO: mutually inductive families
+
 decl syntax derive Show for {n} = %runElab (deriveShow `{n})
 
 derive Show for MyNat
 derive Show for MyList
 derive Show for MyVect
 derive Show for CompileTimeNat
+-- TODO: derive Show for Rose
 
 
 namespace Tests

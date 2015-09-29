@@ -8,9 +8,8 @@ import Data.So
 import Control.WellFounded
 import Data.Nat.DivMod.IteratedSubtraction
 
-import Language.Reflection.Elab
-import Derive.Elim
-import Derive.Kit
+import Pruviloj.Core
+import Pruviloj.Derive.Eliminators
 import Derive.TestDefs
 
 %default total
@@ -52,7 +51,7 @@ forEffect = %runElab (do deriveElim `{Vect} (mkName "vectElim")
                          deriveElim `{Even} (mkName "evenElim")
                          deriveElim `{Odd} (mkName "oddElim")
                          deriveElim `{Accessible} (mkName "accElim")
-                         trivial)
+                         search)
 
 
 ||| Simple function computed using an eliminator
@@ -66,19 +65,19 @@ plusIsAssociative = \x,y,z => natElim x (\n => plus n (plus y z) = plus (plus n 
 
 
 ||| The "shape" of the underlying tree for Nat encoded as a W-type
-wNatStep : Bool -> Type
-wNatStep b = if b then () else Void
+WNatStep : Bool -> Type
+WNatStep b = if b then () else Void
 
 ||| Nats, as a W-type
-wNat : Type
-wNat = W Bool wNatStep
+WNat : Type
+WNat = W Bool WNatStep
 
 ||| Zero (it has no predecessors!)
-wZ : wNat
-wZ = Sup False void
+WZ : WNat
+WZ = Sup False void
 
 ||| Succ (it has a single predecessor, thus ()!)
-wS : wNat -> wNat
+wS : WNat -> WNat
 wS n = Sup True (const n)
 
 
@@ -88,18 +87,18 @@ wS n = Sup True (const n)
 ||| Nat. A separate, equivalent encoding would not work due to W-types
 ||| being basically useless in intensional type theory. Nevertheless,
 ||| it demonstrates that the generated eliminators can be used.
-indWNat : (P : wNat -> Type) -> P wZ -> ((n : wNat) -> P n -> P (wS n)) -> (n : wNat) -> P n
-indWNat P z s n = wElim Bool wNatStep n P
+indWNat : (P : WNat -> Type) -> P WZ -> ((n : WNat) -> P n -> P (wS n)) -> (n : WNat) -> P n
+indWNat P z s n = wElim Bool WNatStep n P
                     (\b => boolElim b
-                            (\b' => (f : wNatStep b' -> wNat) ->
-                                    ((x : wNatStep b') -> P (f x)) ->
+                            (\b' => (f : WNatStep b' -> WNat) ->
+                                    ((x : WNatStep b') -> P (f x)) ->
                                     P (Sup b' f))
                             (\f, _ => rewrite voidFunext f void in z)
                             (\f, ih => rewrite unitFunext f in s (f ()) (ih ())))
   where
     ||| Functional extensionality that uses unsafe features to get it
     ||| to actually compute. This is evil and perhaps even inconsistent:
-    ||| replace with a postulate for sanity. But it lets addition of wNat go.
+    ||| replace with a postulate for sanity. But it lets addition of WNat go.
     funext : (f, g : a -> b) -> ((x : a) -> f x = g x) -> f = g
     funext {a} {b} f g fun = really_believe_me (Refl {A=a->b} {x=f})
     voidFunext : (f, g : Void -> a) -> f = g
@@ -109,8 +108,8 @@ indWNat P z s n = wElim Bool wNatStep n P
     unitFunext : (f : () -> a) -> f = \x => f ()
     unitFunext = \f => funext f (\x => f ()) (\x => cong (unitEta x))
 
-addWNat : wNat -> wNat -> wNat
-addWNat x y = indWNat (const wNat) y (\_, m => wS m) x
+addWNat : WNat -> WNat -> WNat
+addWNat x y = indWNat (const WNat) y (\_, m => wS m) x
 
 
 
