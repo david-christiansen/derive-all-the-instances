@@ -36,9 +36,9 @@ declareEq fam eq info =
     applyTyCon : List TyConArg -> Raw -> Elab (List FunArg)
     applyTyCon [] acc = return $ [MkFunArg !(gensym "arg") acc Explicit NotErased]
     applyTyCon (TyConIndex arg :: args) acc =
-        (\tl => makeImplicit arg :: tl) <$> applyTyCon args (RApp acc (Var (argName arg)))
+        (\tl => makeImplicit arg :: tl) <$> applyTyCon args (RApp acc (Var (name arg)))
     applyTyCon (TyConParameter arg :: args) acc =
-        applyTyCon args (RApp acc (Var (argName arg)))
+        applyTyCon args (RApp acc (Var (name arg)))
 
     getFunArg : TyConArg -> FunArg
     getFunArg (TyConParameter x) = makeImplicit x
@@ -51,7 +51,7 @@ declareEq fam eq info =
 
 ||| Make the matching clause for a single constructor
 ctorClause : (fam, eq : TTName) -> (info : TyConInfo) ->
-             (c : (TTName, List CtorArg, Raw)) -> Elab FunClause
+             (c : (TTName, List CtorArg, Raw)) -> Elab (FunClause Raw)
 ctorClause fam eq info ctor =
   do -- Simultaneously compute the LHS and its type using the Sigma trick
      -- Begin by making non-param names unique (so we can use them for holes as well)
@@ -71,31 +71,31 @@ ctorClause fam eq info ctor =
           holes' <- apply (mkApp (Var eq) (map (Var . fst) (getParams info)))
                           (replicate (length (getParams info) + 2 +
                                       2 * length (getIndices info))
-                                     (True, 0))
+                                     True)
           solve
           -- We can find the argument positions by counting
           -- holes. Drop the constraints and indices, then take
           -- an arg, then drop the indices again, then take an
           -- arg
-          focus (snd !(unsafeNth (length (getParams info) + (length (getIndices info))) holes'))
+          focus !(unsafeNth (length (getParams info) + (length (getIndices info))) holes')
           apply (Var arg1) []; solve
-          focus (snd !(unsafeNth (1 + length (getParams info) + 2 * (length (getIndices info))) holes'))
+          focus !(unsafeNth (1 + length (getParams info) + 2 * (length (getIndices info))) holes')
           apply (Var arg2) []; solve
 
           -- Now we get the actual arguments in place
           focus arg1
-          apply (mkApp (Var cn1) (map (Var . argName . ctorFunArg) ctorArgs1)) []
+          apply (mkApp (Var cn1) (map (Var . name . ctorFunArg) ctorArgs1)) []
           solve
           focus arg2
-          apply (mkApp (Var cn2) (map (Var . argName . ctorFunArg) ctorArgs2)) []
+          apply (mkApp (Var cn2) (map (Var . name . ctorFunArg) ctorArgs2)) []
           solve)
       (checkEq (zip ctorArgs1 ctorArgs2))
 
 
   where mkArgHole : CtorArg -> Elab ()
         mkArgHole (CtorParameter _) = return ()
-        mkArgHole (CtorField arg) = do claim (argName arg) (argTy arg)
-                                       unfocus (argName arg)
+        mkArgHole (CtorField arg) = do claim (name arg) (type arg)
+                                       unfocus (name arg)
 
         ctorFunArg : CtorArg -> FunArg
         ctorFunArg (CtorParameter a) = a
@@ -108,52 +108,52 @@ ctorClause fam eq info ctor =
           case erasure a1 of
             Erased => checkEq args
             NotErased =>
-              if isRType (argTy a1) then checkEq args
+              if isRType (type a1) then checkEq args
                 else
                          do [here, todo] <- apply (Var `{(&&)})
-                                                  [(False, 0), (False, 0)]
+                                                  [False, False]
                             solve
-                            focus (snd here)
+                            focus here
                             checkArg
 
-                            focus (snd todo)
-                            [(_, next)] <- apply `(Delay {t=LazyEval} {a=Bool}) [(False, 0)]
+                            focus todo
+                            [next] <- apply `(Delay {t=LazyEval} {a=Bool}) [False]
                             solve
                             focus next
                             checkEq args
           where
                 checkArg : Elab ()
-                checkArg = if headName (argTy a1) == Just fam
-                             then do hs <- apply (mkApp (Var eq) (map (Var . fst) (getParams info)))
-                                                 (replicate (length (getParams info) + 2 + 2 * (length (getIndices info)))
-                                                            (True, 0))
+                checkArg = if headName (type a1) == Just fam
+                             then do args <- Tactics.apply (mkApp (Var eq) (map (Var . fst) (getParams info)))
+                                                   (replicate (length (getParams info) + 2 + 2 * (length (getIndices info)))
+                                                               True)
                                      solve
                                      -- take care of TC dicts
                                      traverse_
-                                         (\h => do focus (snd h); resolveTC eq)
-                                         (List.take (length (getParams info)) hs)
-                                     field1 <- snd <$> unsafeNth (length (getParams info) + length (getIndices info)) hs
-                                     field2 <- snd <$> unsafeNth (1 + length (getParams info) + 2 * length (getIndices info)) hs
-                                     focus field1; apply (Var (argName a1)) []; solve
-                                     focus field2; apply (Var (argName a2)) []; solve
+                                         (\h => do focus h; resolveTC eq)
+                                         (List.take (length (getParams info)) args)
+                                     field1 <- unsafeNth (length (getParams info) + length (getIndices info)) args
+                                     field2 <- unsafeNth (1 + length (getParams info) + 2 * length (getIndices info)) args
+                                     focus field1; apply (Var (name a1)) []; solve
+                                     focus field2; apply (Var (name a2)) []; solve
 
 
                              else do [ty, inst, x, y] <-
-                                       apply (Var (NS (UN "==") ["Classes", "Prelude"])) (replicate 4 (False, 0))
+                                       apply (Var (NS (UN "==") ["Classes", "Prelude"])) (replicate 4 False)
                                      solve
-                                     focus (snd x); apply (Var (argName a1)) []; solve
-                                     focus (snd y); apply (Var (argName a2)) []; solve
-                                     focus (snd ty); apply (argTy a1) []; solve
+                                     focus x; apply (Var (name a1)) []; solve
+                                     focus y; apply (Var (name a2)) []; solve
+                                     focus ty; apply (type a1) []; solve
                                      -- Choose an Eq instance to compare this arg
-                                     focus (snd inst)
+                                     focus inst
                                      resolveTC eq
         checkEq _ = empty
 
 
-catchall : (eq : TTName) -> (info : TyConInfo) -> Elab FunClause
+catchall : (eq : TTName) -> (info : TyConInfo) -> Elab (FunClause Raw)
 catchall eq info =
    elabPatternClause
-     (do apply (Var eq) (replicate (2 * length (args info) + 2) (False, 0))
+     (do apply (Var eq) (replicate (2 * length (args info) + 2) False)
          solve)
      (do fill `(False)
          solve)
@@ -171,7 +171,7 @@ catchall eq info =
 instClause : (eq, instn : TTName) ->
              (info : TyConInfo) ->
              (instArgs, instConstrs : List FunArg) ->
-             Elab (List FunClause)
+             Elab (List (FunClause Raw))
 instClause eq instn info instArgs instConstrs =
   do let baseCtorN = SN (InstanceCtorN `{Classes.Eq})
      (ctorN, _, _) <- lookupTyExact baseCtorN
@@ -179,13 +179,13 @@ instClause eq instn info instArgs instConstrs =
                  (do apply (Var instn)
                            (replicate (length instArgs +
                                        length instConstrs)
-                                      (True, 0))
+                                      True)
                      solve)
-                 (do [(_, a), (_, b), (_, c)] <- apply (Var ctorN) [(True, 0), (False, 0), (False, 0)]
+                 (do [a, b, c] <- apply (Var ctorN) [True, False, False]
                      solve
                      focus b; callEq (return ())
                      focus c
-                     callEq $ do [(_, notArg)] <- apply `(not) [(True, 0)]
+                     callEq $ do [notArg] <- apply `(not) [True]
                                  solve
                                  focus notArg
                      -- the only holes left are the constraint dicts
@@ -208,14 +208,14 @@ instClause eq instn info instArgs instConstrs =
           argHs <- apply (Var eq)
                      (replicate (2 * length (getParams info) +
                                  2 * length (getIndices info) +
-                                 2) (True, 0))
-          focus (snd !(unsafeNth (2 * length (getParams info) +
-                                  length (getIndices info))
-                                 argHs))
+                                 2) True)
+          focus !(unsafeNth (2 * length (getParams info) +
+                                 length (getIndices info))
+                            argHs)
           apply (Var x) []; solve
-          focus (snd !(unsafeNth (2 * length (getParams info) +
-                                  2 * length (getIndices info) + 1)
-                                 argHs))
+          focus !(unsafeNth (2 * length (getParams info) +
+                             2 * length (getIndices info) + 1)
+                            argHs)
           apply (Var y) []; solve
           solve; solve -- attacks
           solve -- the hole
@@ -254,8 +254,8 @@ deriveEq fam =
      return ()
 
   where tcArgName : TyConArg -> TTName
-        tcArgName (TyConParameter x) = argName x
-        tcArgName (TyConIndex x) = argName x
+        tcArgName (TyConParameter x) = name x
+        tcArgName (TyConIndex x) = name x
 
         tcFunArg : TyConArg -> FunArg
         tcFunArg (TyConParameter x) = record {plicity = Implicit} x

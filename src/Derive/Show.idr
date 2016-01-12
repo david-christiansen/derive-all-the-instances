@@ -36,9 +36,9 @@ declareShow fam eq info =
     applyTyCon : List TyConArg -> Raw -> Elab (List FunArg)
     applyTyCon [] acc = return $ [MkFunArg !(gensym "arg") acc Explicit NotErased]
     applyTyCon (TyConIndex arg :: args) acc =
-        (\tl => makeImplicit arg :: tl) <$> applyTyCon args (RApp acc (Var (argName arg)))
+        (\tl => makeImplicit arg :: tl) <$> applyTyCon args (RApp acc (Var (name arg)))
     applyTyCon (TyConParameter arg :: args) acc =
-        applyTyCon args (RApp acc (Var (argName arg)))
+        applyTyCon args (RApp acc (Var (name arg)))
 
     getFunArg : TyConArg -> FunArg
     getFunArg (TyConParameter x) = makeImplicit x
@@ -59,7 +59,7 @@ strName NErased = "**Erased**" -- won't happen with user-declared types
 
 ||| Make the show clause for a single constructor
 ctorClause : (fam, sh : TTName) -> (info : TyConInfo) ->
-             (c : (TTName, List CtorArg, Raw)) -> Elab FunClause
+             (c : (TTName, List CtorArg, Raw)) -> Elab (FunClause Raw)
 ctorClause fam sh info ctor =
   do -- Begin by making non-param names unique (so we can use them for holes as well)
     (cn, ctorArgs, resTy) <- processCtorArgs info ctor
@@ -79,17 +79,17 @@ ctorClause fam sh info ctor =
           holes' <- apply (mkApp (Var sh) (map (Var . fst) (getParams info)))
                           (replicate (length (getParams info) +
                                       length (getIndices info) + 2)
-                                     (True, 0))
+                                     True)
           solve
           -- We can find the argument positions by counting
           -- holes. Drop the constraints and indices, then take
           -- an arg
-          focus (snd !(unsafeNth (1 + length (getParams info) + (length (getIndices info))) holes'))
+          focus !(unsafeNth (1 + length (getParams info) + (length (getIndices info))) holes')
           apply (Var arg) []; solve
 
           -- Now we get the actual arguments in place
           focus arg
-          apply (mkApp (Var cn) (map (Var . argName . ctorFunArg) ctorArgs)) []
+          apply (mkApp (Var cn) (map (Var . name . ctorFunArg) ctorArgs)) []
           solve)
       (if hasArgsToShow ctorArgs
          then do d <- newHole "d" `(Prec)
@@ -104,8 +104,8 @@ ctorClause fam sh info ctor =
 
   where mkArgHole : CtorArg -> Elab ()
         mkArgHole (CtorParameter _) = return ()
-        mkArgHole (CtorField arg) = do claim (argName arg) (argTy arg)
-                                       unfocus (argName arg)
+        mkArgHole (CtorField arg) = do claim (name arg) (type arg)
+                                       unfocus (name arg)
 
         ctorFunArg : CtorArg -> FunArg
         ctorFunArg (CtorParameter a) = a
@@ -119,7 +119,7 @@ ctorClause fam sh info ctor =
                fill `(~(Var argHere) ++ ~(Var rest) : String)
                solve
                focus argHere
-               if headName (argTy thisArg) == Just fam
+               if headName (type thisArg) == Just fam
                  then recursiveCall
                  else useShow
                focus rest
@@ -135,23 +135,23 @@ ctorClause fam sh info ctor =
                                (replicate (length (getParams info) +
                                            length (getIndices info)
                                            + 2)
-                                          (True, 0))
+                                          True)
                    solve
                    -- TC dict arguments to recursive call should be threaded through
                    traverse_
-                     (\h => do inHole (snd h) (resolveTC sh))
+                     (\h => do ignore $ inHole h (resolveTC sh))
                      (List.take (length (getParams info)) hs)
-                   prec <- snd <$> unsafeNth (length (getParams info)) hs
+                   prec <- unsafeNth (length (getParams info)) hs
                    focus prec; apply `(App : Prec) []; solve
-                   field <- snd <$> unsafeNth (1 + length (args info)) hs
-                   inHole field (apply (Var (argName thisArg)) [] *> solve)
+                   field <- unsafeNth (1 + length (args info)) hs
+                   ignore $ inHole field (apply (Var (name thisArg)) [] *> solve)
 
             useShow : Elab ()
             useShow =
                 do -- call the real showArg
-                   [(_, tyH), (_, dictH), (_, xH)] <- apply (Var `{showArg}) [(True, 0), (True, 0), (True, 0)]
+                   [tyH, dictH, xH] <- apply (Var `{showArg}) [True, True, True]
                    solve
-                   focus xH; apply (Var (argName thisArg)) []; solve
+                   focus xH; apply (Var (name thisArg)) []; solve
                    focus dictH; resolveTC sh
 
 
@@ -175,14 +175,14 @@ ctorClause fam sh info ctor =
                     do h <- newHole "next" `(String)
                        fill `(" _" ++ ~(Var h) : String); solve
                        focus h
-                showCtorArg' thisArg@(MkFunArg argName _ Explicit NotErased) =
+                showCtorArg' thisArg@(MkFunArg name _ Explicit NotErased) =
                     showOneArg thisArg
                 showCtorArg' _ = skip
 
 instClause : (sh, instn : TTName) ->
              (info : TyConInfo) ->
              (instArgs, instConstrs : List FunArg) ->
-             Elab (List FunClause)
+             Elab (List (FunClause Raw))
 instClause sh instn info instArgs instConstrs =
   do let baseCtorN = SN (InstanceCtorN `{Show})
      (ctorN, _, _) <- lookupTyExact baseCtorN
@@ -190,10 +190,10 @@ instClause sh instn info instArgs instConstrs =
                  (do apply (Var instn)
                            (replicate (length instArgs +
                                        length instConstrs)
-                                      (True, 0))
+                                      True)
                      solve)
-                 (do [(_, ty), (_, showImpl), (_, showPrecImpl)] <-
-                        apply (Var ctorN) [(True, 0), (False, 0), (False, 0)]
+                 (do [ty, showImpl, showPrecImpl] <-
+                        apply (Var ctorN) [True, False, False]
                      solve
 
                      -- ty was solved by unification, if things are going right
@@ -203,9 +203,9 @@ instClause sh instn info instArgs instConstrs =
                      shPArgs <- apply (Var sh)
                                       (replicate (2 * length (getParams info) +
                                                   length (getIndices info) + 2)
-                                                 (True, 0))
-                     focus (snd !(last shPArgs)); apply (Var shArg) []; solve
-                     traverse_ (\h => inHole (snd h) (exact `(Open : Prec) <|> resolveTC instn))
+                                                 True)
+                     focus !(last shPArgs); apply (Var shArg) []; solve
+                     traverse_ (\h => inHole h (exact `(Open : Prec) <|> resolveTC instn))
                                shPArgs
                      solve -- attack
                      solve -- the hole in the instance constructor
@@ -218,13 +218,13 @@ instClause sh instn info instArgs instConstrs =
                      shPArgs' <- apply (Var sh)
                                        (replicate (2 * length (getParams info) +
                                                    length (getIndices info) + 2)
-                                                  (True, 0))
-                     focus (snd !(last shPArgs')); apply (Var shPArgX) []; solve
+                                                  True)
+                     focus !(last shPArgs'); apply (Var shPArgX) []; solve
 
-                     focus (snd !(unsafeNth (2 * length (getParams info) )
-                                            shPArgs'))
+                     focus !(unsafeNth (2 * length (getParams info) )
+                                            shPArgs')
                      apply (Var shPArgP) []; solve
-                     traverse_ (\h => inHole (snd h) (resolveTC instn)) shPArgs'
+                     traverse_ (\h => inHole h (resolveTC instn)) shPArgs'
                      solve; solve -- attacks
                      solve) -- constructor hole
 
@@ -264,8 +264,8 @@ deriveShow fam =
        addInstance `{Show} instn
        return ()
   where tcArgName : TyConArg -> TTName
-        tcArgName (TyConParameter x) = argName x
-        tcArgName (TyConIndex x) = argName x
+        tcArgName (TyConParameter x) = name x
+        tcArgName (TyConIndex x) = name x
 
         tcFunArg : TyConArg -> FunArg
         tcFunArg (TyConParameter x) = record {plicity = Implicit} x
@@ -290,16 +290,12 @@ namespace TestDecls
     MkCTN : .(n : Nat) -> CompileTimeNat
 
 
-  data Rose a = MkRose a (List (Rose a))
--- TODO: mutually inductive families
-
 decl syntax derive Show for {n} = %runElab (deriveShow `{n})
 
 derive Show for MyNat
 derive Show for MyList
 derive Show for MyVect
 derive Show for CompileTimeNat
--- TODO: derive Show for Rose
 
 
 namespace Tests

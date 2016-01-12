@@ -1,12 +1,14 @@
 module Derive.Injective
 
-import Language.Reflection.Elab
 import Language.Reflection.Utils
-
 import Derive.Kit
+import Pruviloj.Core
 
 %default total
 %access public
+
+mkPairTy : Raw -> Raw -> Raw
+mkPairTy a b = `((~a, ~b) : Type)
 
 
 private
@@ -34,8 +36,8 @@ makeEqualities args1 args2 =
     where getTy : List Raw -> Raw
           getTy [] = `(():Type)
           getTy [x] = x
-          getTy [x, y] = mkPairTy x y
-          getTy (x::y::zs) = mkPairTy x (getTy (y::zs))
+          getTy [x, y] = `((~x, ~y) : Type)
+          getTy (x::y::zs) = `((~x, ~(getTy (y::zs))) : Type)
 
 
 ||| Make the type declaration for an injectivity lemma for a constructor specification
@@ -53,7 +55,11 @@ mkInjectiveTy fn mkGoal (cn, cty) =
                         ~(mkApp (Var cn) (map (Var . fst) args1))
                         ~(mkApp (Var cn) (map (Var . fst) args2)))
      let retTy = mkGoal args1 args2
-     return $ Declare fn (map (\(n, b) => Implicit n (getBinderTy b)) (args1 ++ args2) ++ [Explicit hypN hypTy]) retTy
+     return $ Declare fn
+                      (map (\(n, b) => MkFunArg n (getBinderTy b) Implicit NotErased)
+                           (args1 ++ args2) ++
+                       [MkFunArg hypN hypTy Explicit NotErased])
+                      retTy
 
 
 
@@ -70,7 +76,7 @@ mkInjectiveRhs : TTName -> (TTName, Raw) -> Elab Raw
 mkInjectiveRhs fn (cn, cty) =
   do (args, res) <- stealBindings cty (const Nothing)
      let goal = bindPatTys args $ makeEqualities args args
-     rhs <- runElab goal $ (do repeatUntilFail bindPat; trivial) <|> trivial
+     rhs <- runElab goal $ (do repeatUntilFail bindPat; search) <|> search
      return !(forgetTypes (fst rhs))
 
 partial
@@ -86,7 +92,7 @@ partial
 deriveInjectivity : TTName -> Elab ()
 deriveInjectivity tyn' =
   do MkDatatype tyn _ _ cons <- lookupDatatypeExact tyn'
-     traverse_ mkInjectiveHelper cons
+     for_ cons mkInjectiveHelper
 
 forEffect : ()
 forEffect = %runElab (do deriveInjectivity `{List}

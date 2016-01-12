@@ -6,7 +6,9 @@ module Derive.Disjoint
 import Language.Reflection.Elab
 import Language.Reflection.Utils
 
-import Derive.Kit
+--import Derive.Kit
+
+import Pruviloj.Internals
 
 %default total
 %access public
@@ -23,7 +25,7 @@ disjointN n n' = SN $ MetaN n $ SN $ MetaN disjointMaker n'
 
 
 mkRhs : TTName -> List (TTName, Binder Raw) -> Raw -> Raw
-mkRhs fn bs uninh = foldr (\x, rest => RBind (fst x) (Lam (getBinderTy (snd x))) rest)
+mkRhs fn bs uninh = Foldable.foldr (\x, rest => RBind (fst x) (Lam (getBinderTy (snd x))) rest)
                           uninh
                           bs
 
@@ -37,7 +39,7 @@ disjointTy fn mkRes (cn1, ct1) (cn2, ct2) =
      let resTy = mkRes `((=) {A=~res1} {B=~res2}
                              ~(mkApp (Var cn1) (map (Var . fst) args1))
                              ~(mkApp (Var cn2) (map (Var . fst) args2)))
-     return $ mkDecl fn (args1 ++ args2) resTy
+     return $ Declare fn (args1 ++ args2) resTy
 
 partial
 disjointRhs : TTName -> (Raw -> Raw) -> (TTName, Raw) -> (TTName, Raw) -> Elab Raw

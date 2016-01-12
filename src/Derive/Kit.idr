@@ -4,6 +4,7 @@ import Data.Vect
 
 import Language.Reflection.Elab
 import Language.Reflection.Utils
+import Pruviloj.Core
 
 %default total
 
@@ -60,19 +61,6 @@ unsafeNth _     []        = fail [TextPart "Ran out of list elements"]
 unsafeNth Z     (x :: _)  = return x
 unsafeNth (S k) (_ :: xs) = unsafeNth k xs
 
-
-||| Generate a unique name (using `gensym`) that looks like some
-||| previous name, for ease of debugging code generators.
-nameFrom : TTName -> Elab TTName
-nameFrom (UN x) = gensym $ if length x == 0 || ("_" `isPrefixOf` x)
-                             then "x"
-                             else x
-nameFrom (NS n ns) = nameFrom n -- throw out namespaces here, because we want to generate bound var names
-nameFrom (MN x n) = gensym $ if length n == 0 || ("_" `isPrefixOf` n)
-                               then "n"
-                               else n
-nameFrom (SN x) = gensym "SN"
-nameFrom NErased = gensym "wasErased"
 
 headVar : Raw -> Maybe TTName
 headVar (RApp f _) = headVar f
@@ -196,58 +184,8 @@ updateTyConArgTy f (TyConParameter a) = TyConParameter (record {argTy = f (argTy
 updateTyConArgTy f (TyConIndex a) = TyConIndex (record {argTy = f (argTy a) } a)
 
 namespace Tactics
-  newHole : String -> Raw -> Elab TTName
-  newHole hint ty = do hn <- gensym hint
-                       claim hn ty
-                       unfocus hn
-                       return hn
 
-  exact : Raw -> Elab ()
-  exact tm = do apply tm []
-                solve
 
-  ||| A tactic for dispatching trivial goals, along with conjunctions
-  ||| and disjunctions of these.
-  partial
-  trivial : Elab ()
-  trivial = do compute
-               g <- snd <$> getGoal
-               case !(forgetTypes g) of
-                 `((=) {A=~A} {B=~_} ~x ~_) =>
-                     do apply [| (Var `{Refl}) A x |] []
-                        solve
-                 `(() : Type) =>
-                     do apply `(() : ()) []
-                        solve
-                 `(Pair ~t1 ~t2) =>
-                     do fstH <- newHole "fst" t1
-                        sndH <- newHole "snd" t2
-                        apply `(MkPair {A=~t1} {B=~t2} ~(Var fstH) ~(Var sndH)) []
-                        solve
-                        focus fstH; trivial
-                        focus sndH; trivial
-                 `(Either ~a ~b) =>
-                    (do lft <- newHole "left" a
-                        apply `(Left {a=~a} {b=~b} ~(Var lft)) []
-                        solve
-                        focus lft; trivial) <|>
-                    (do rght <- newHole "right" b
-                        apply `(Right {a=~a} {b=~b} ~(Var rght)) []
-                        solve
-                        focus rght; trivial)
-                 _ =>
-                     fail [TermPart g, TextPart "is not trivial"]
-  partial
-  repeatUntilFail : Elab () -> Elab ()
-  repeatUntilFail tac = do tac
-                           (repeatUntilFail tac <|> return ())
-
-  bindPat : Elab ()
-  bindPat = do compute
-               g <- snd <$> getGoal
-               case g of
-                 Bind n (PVTy _) _ => patbind n
-                 _ => fail [TermPart g, TextPart "isn't looking for a pattern."]
 
   intro1 : Elab TTName
   intro1 = do g <- snd <$> getGoal
@@ -269,11 +207,6 @@ namespace Tactics
           go _ = return []
 
 
-  inHole : TTName -> Elab () -> Elab ()
-  inHole h todo =
-    if h `elem` !getHoles
-      then do focus h; todo
-      else skip
 
 
 ||| Helper for elaborating pattern clauses. This helper takes care of
@@ -317,6 +250,3 @@ elabPatternClause lhs rhs =
 instance (Show a, Show b) => Show (Either a b) where
   show (Left x) = "(Left " ++ show x ++ ")"
   show (Right x) = "(Right " ++ show x ++ ")"
-
-testTriv : ((), (), (), (Either Void ()))
-testTriv = %runElab trivial
