@@ -139,7 +139,7 @@ ctorClause fam eq info ctor =
 
 
                              else do [ty, inst, x, y] <-
-                                       apply (Var (NS (UN "==") ["Classes", "Prelude"])) (replicate 4 False)
+                                       apply (Var (NS (UN "==") ["Interfaces", "Prelude"])) (replicate 4 False)
                                      solve
                                      focus x; apply (Var (name a1)) []; solve
                                      focus y; apply (Var (name a2)) []; solve
@@ -173,7 +173,7 @@ instClause : (eq, instn : TTName) ->
              (instArgs, instConstrs : List FunArg) ->
              Elab (List (FunClause Raw))
 instClause eq instn info instArgs instConstrs =
-  do let baseCtorN = SN (InstanceCtorN `{Classes.Eq})
+  do let baseCtorN = SN (InstanceCtorN `{Interfaces.Eq})
      (ctorN, _, _) <- lookupTyExact baseCtorN
      clause <- elabPatternClause
                  (do apply (Var instn)
@@ -221,7 +221,7 @@ instClause eq instn info instArgs instConstrs =
           solve -- the hole
 
 
-abstract
+export
 deriveEq : (fam : TTName) -> Elab ()
 deriveEq fam =
   do eq <- flip NS !currentNamespace . SN . MetaN fam <$> gensym "equalsImpl"
@@ -229,7 +229,7 @@ deriveEq fam =
      info <- getTyConInfo (tyConArgs datatype) (tyConRes datatype)
      decl <- declareEq fam eq info
      declareType decl
-     let instn = NS (SN $ InstanceN `{Classes.Eq} [show fam]) !currentNamespace
+     let instn = NS (SN $ InstanceN `{Interfaces.Eq} [show fam]) !currentNamespace
      instConstrs <- Foldable.concat <$>
                     traverse (\ param =>
                                 case param of
@@ -241,7 +241,7 @@ deriveEq fam =
                                   _ => return [])
                              (getParams info)
      let instArgs = map tcFunArg (args info)
-     let instRes = RApp (Var `{Classes.Eq})
+     let instRes = RApp (Var `{Interfaces.Eq})
                         (mkApp (Var fam)
                                (map (Var . tcArgName) (args info)))
      declareType $ Declare instn (instArgs ++ instConstrs) instRes
@@ -250,7 +250,7 @@ deriveEq fam =
      defineFunction $ DefineFun eq (clauses ++ [!(catchall eq info)])
      defineFunction $
        DefineFun instn !(instClause eq instn info instArgs instConstrs)
-     addInstance `{Classes.Eq} instn
+     addInstance `{Interfaces.Eq} instn
      return ()
 
   where tcArgName : TyConArg -> TTName
