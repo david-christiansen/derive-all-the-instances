@@ -109,7 +109,6 @@ alphaRaw subst (RBind n b tm) =
 alphaRaw subst (RApp tm tm') = RApp (alphaRaw subst tm) (alphaRaw subst tm')
 alphaRaw subst RType = RType
 alphaRaw subst (RUType x) = RUType x
-alphaRaw subst (RForce tm) = RForce (alphaRaw subst tm)
 alphaRaw subst (RConstant c) = RConstant c
 
 
@@ -133,7 +132,6 @@ getBinderTy : Binder t -> t
 getBinderTy (Lam t) = t
 getBinderTy (Pi t _) = t
 getBinderTy (Let t _) = t
-getBinderTy (NLet t _) = t
 getBinderTy (Hole t) = t
 getBinderTy (GHole t) = t
 getBinderTy (Guess t _) = t
@@ -142,16 +140,6 @@ getBinderTy (PVTy t) = t
 
 mkDecl : TTName -> List (TTName, Erasure, Binder Raw) -> Raw -> TyDecl
 mkDecl fn xs tm = Declare fn (map (\(n, e, b) => MkFunArg  n (getBinderTy b) Implicit e) xs) tm
-
-mkApp : Raw -> List Raw -> Raw
-mkApp f [] = f
-mkApp f (x :: xs) = mkApp (RApp f x) xs
-
-unApply : Raw -> (Raw, List Raw)
-unApply tm = unApply' tm []
-  where unApply' : Raw -> List Raw -> (Raw, List Raw)
-        unApply' (RApp f x) xs = unApply' f (x::xs)
-        unApply' notApp xs = (notApp, xs)
 
 mkPairTy : Raw -> Raw -> Raw
 mkPairTy a b = `((~a, ~b) : Type)
@@ -169,19 +157,19 @@ bindPatTys [] res = res
 bindPatTys ((n, b)::bs) res = RBind n (PVTy (getBinderTy b)) $ bindPatTys bs res
 
 updateFunArgTy : (Raw -> Raw) -> FunArg -> FunArg
-updateFunArgTy f arg = record {argTy = f (record {argTy} arg)} arg
+updateFunArgTy f arg = record {type = f (record {type} arg)} arg
 
 tyConArgName : TyConArg -> TTName
-tyConArgName (TyConParameter a) = argName a
-tyConArgName (TyConIndex a) = argName a
+tyConArgName (TyConParameter a) = name a
+tyConArgName (TyConIndex a) = name a
 
 setTyConArgName : TyConArg -> TTName -> TyConArg
-setTyConArgName (TyConParameter a) n = TyConParameter (record {argName = n} a)
-setTyConArgName (TyConIndex a) n = TyConIndex (record {argName = n} a)
+setTyConArgName (TyConParameter a) n = TyConParameter (record {name = n} a)
+setTyConArgName (TyConIndex a) n = TyConIndex (record {name = n} a)
 
 updateTyConArgTy : (Raw -> Raw) -> TyConArg -> TyConArg
-updateTyConArgTy f (TyConParameter a) = TyConParameter (record {argTy = f (argTy a) } a)
-updateTyConArgTy f (TyConIndex a) = TyConIndex (record {argTy = f (argTy a) } a)
+updateTyConArgTy f (TyConParameter a) = TyConParameter (record {type = f (type a) } a)
+updateTyConArgTy f (TyConIndex a) = TyConIndex (record {type = f (type a) } a)
 
 namespace Tactics
 
@@ -209,44 +197,3 @@ namespace Tactics
 
 
 
-||| Helper for elaborating pattern clauses. This helper takes care of
-||| inferring the type of the left-hand side and bringing that
-||| information onward to the right-hand side.
-|||
-||| While elaborating the left-hand side, the proof term contains a
-||| Sigma type. This is part of the type inference going on and will
-||| be removed.
-|||
-||| @ lhs the tactic script to establish the left-hand side of the
-|||       clause. It should cause an application of the term being
-|||       defined. Any holes left behind will be converted to pattern
-|||       variables with the same name.
-||| @ rhs the tactic script to establish the right side of the clause.
-|||       It will be run in a context where the pattern variables are
-|||       already bound, and should leave behind no holes.
-partial
-elabPatternClause : (lhs, rhs : Elab ()) -> Elab FunClause
-elabPatternClause lhs rhs =
-  do -- Elaborate the LHS in a context where its type will be solved via unification
-     (pat, _) <- runElab `(Sigma Type id) $
-                    do th <- newHole "finalTy" `(Type)
-                       patH <- newHole "pattern" (Var th)
-                       fill `(MkSigma ~(Var th) ~(Var patH) : Sigma Type id)
-                       solve
-                       focus patH
-                       lhs
-                       -- Convert all remaining holes to pattern variables
-                       traverse_ {b=()} (\h => focus h *> patvar h) !getHoles
-     let (pvars, sigma) = extractBinders !(forgetTypes pat)
-     (rhsTy, lhsTm) <- getSigmaArgs sigma
-     rhsTm <- runElab (bindPatTys pvars rhsTy) $
-                                  do -- Introduce all the pattern variables from the LHS
-                   repeatUntilFail bindPat <|> return ()
-                   rhs
-     realRhs <- forgetTypes (fst rhsTm)
-     return $ MkFunClause (bindPats pvars lhsTm) realRhs
-
---TODO: move to prelude
-instance (Show a, Show b) => Show (Either a b) where
-  show (Left x) = "(Left " ++ show x ++ ")"
-  show (Right x) = "(Right " ++ show x ++ ")"

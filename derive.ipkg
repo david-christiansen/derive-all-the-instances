@@ -5,5 +5,5 @@ package derive
 
 
 sourcedir = src
-modules = Derive.Disjoint, Derive.Kit, Derive.Injective, Derive.Elim, Derive.ElimTest, Derive.Eq
+modules = Derive.Kit, Derive.Eq, Derive.Show, Derive.ShowTests
 pkgs = contrib, pruviloj
