@@ -37,17 +37,17 @@ declareDecEq fn (MkDatatype tyn tyconArgs tyconRes cons) =
 makeClause : TTName -> ((TTName, Raw), (TTName, Raw)) -> Elab (Maybe FunClause)
 makeClause fn ((cn1, ct1), (cn2, ct2)) =
   if cn1 == cn2
-    then return Nothing
+    then pure Nothing
     else
       do (args1, res1) <- stealBindings ct1 (const Nothing)
          (args2, res2) <- stealBindings ct2 (const Nothing)
          let rhsGoal = bindPatTys (args1 ++ args2) $ RType --no
-         return Nothing
+         pure Nothing
 
 makeDecEqClauses : TTName -> List ((TTName, Raw), (TTName, Raw)) -> Elab (List FunClause)
 makeDecEqClauses fn cases =
   do res <- traverse (makeClause fn) cases
-     return $ justs res
+     pure $ justs res
   where justs : List (Maybe a) -> List a
         justs [] = []
         justs (Nothing::xs) = justs xs

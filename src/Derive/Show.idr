@@ -22,19 +22,19 @@ declareShow fam eq info =
      constrs <- traverse
                      (\(n, t) =>
                         do n' <- gensym "constrarg"
-                           return $ MkFunArg n' `(Show ~(Var n)) Constraint NotErased) $
+                           pure $ MkFunArg n' `(Show ~(Var n)) Constraint NotErased) $
                      List.filter (isRType . snd) $
                      getParams info
      precn <- gensym "d"
      let precArg = with List [MkFunArg precn `(Prec) Explicit NotErased]
      arg <- applyTyCon (args info) (Var fam)
-     return $ Declare eq (paramArgs ++ constrs ++ precArg ++ arg) `(String)
+     pure $ Declare eq (paramArgs ++ constrs ++ precArg ++ arg) `(String)
   where
     makeImplicit : FunArg -> FunArg
     makeImplicit arg = record {plicity = Implicit} arg
 
     applyTyCon : List TyConArg -> Raw -> Elab (List FunArg)
-    applyTyCon [] acc = return $ [MkFunArg !(gensym "arg") acc Explicit NotErased]
+    applyTyCon [] acc = pure $ [MkFunArg !(gensym "arg") acc Explicit NotErased]
     applyTyCon (TyConIndex arg :: args) acc =
         (\tl => makeImplicit arg :: tl) <$> applyTyCon args (RApp acc (Var (name arg)))
     applyTyCon (TyConParameter arg :: args) acc =
@@ -103,7 +103,7 @@ ctorClause fam sh info ctor =
          else do fill (RConstant (Str (strName cn))); solve)
 
   where mkArgHole : CtorArg -> Elab ()
-        mkArgHole (CtorParameter _) = return ()
+        mkArgHole (CtorParameter _) = pure ()
         mkArgHole (CtorField arg) = do claim (name arg) (type arg)
                                        unfocus (name arg)
 
@@ -184,7 +184,7 @@ instClause : (sh, instn : TTName) ->
              (instArgs, instConstrs : List FunArg) ->
              Elab (List (FunClause Raw))
 instClause sh instn info instArgs instConstrs =
-  do let baseCtorN = SN (InstanceCtorN `{Show})
+  do let baseCtorN = SN (ImplementationCtorN `{Show})
      (ctorN, _, _) <- lookupTyExact baseCtorN
      clause <- elabPatternClause
                  (do apply (Var instn)
@@ -230,7 +230,7 @@ instClause sh instn info instArgs instConstrs =
 
 
 
-     return [clause]
+     pure [clause]
 
 
 export
@@ -241,16 +241,16 @@ deriveShow fam =
        info <- getTyConInfo (tyConArgs datatype) (tyConRes datatype)
        decl <- declareShow fam sh info
        declareType decl
-       let instn = NS (SN $ InstanceN `{Show} [show fam]) !currentNamespace
+       let instn = NS (SN $ ImplementationN `{Show} [show fam]) !currentNamespace
        instConstrs <- Foldable.concat <$>
                       traverse (\ param =>
                                   case param of
                                     (n, RType) => do constrn <- gensym "instarg"
-                                                     return [MkFunArg constrn
+                                                     pure [MkFunArg constrn
                                                                       `(Show ~(Var n) : Type)
                                                                       Constraint
                                                                       NotErased]
-                                    _ => return [])
+                                    _ => pure [])
                                (getParams info)
        let instArgs = map tcFunArg (args info)
        let instRes = RApp (Var `{Show})
@@ -261,8 +261,8 @@ deriveShow fam =
        defineFunction $ DefineFun sh clauses
        defineFunction $
          DefineFun instn !(instClause sh instn info instArgs instConstrs)
-       addInstance `{Show} instn
-       return ()
+       addImplementation `{Show} instn
+       pure ()
   where tcArgName : TyConArg -> TTName
         tcArgName (TyConParameter x) = name x
         tcArgName (TyConIndex x) = name x
