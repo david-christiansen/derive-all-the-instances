@@ -184,7 +184,7 @@ instClause : (sh, instn : TTName) ->
              (instArgs, instConstrs : List FunArg) ->
              Elab (List (FunClause Raw))
 instClause sh instn info instArgs instConstrs =
-  do let baseCtorN = SN (InstanceCtorN `{Show})
+  do let baseCtorN = SN (ImplementationCtorN `{Show})
      (ctorN, _, _) <- lookupTyExact baseCtorN
      clause <- elabPatternClause
                  (do apply (Var instn)
@@ -241,7 +241,7 @@ deriveShow fam =
        info <- getTyConInfo (tyConArgs datatype) (tyConRes datatype)
        decl <- declareShow fam sh info
        declareType decl
-       let instn = NS (SN $ InstanceN `{Show} [show fam]) !currentNamespace
+       let instn = NS (SN $ ImplementationN `{Show} [show fam]) !currentNamespace
        instConstrs <- Foldable.concat <$>
                       traverse (\ param =>
                                   case param of
@@ -261,7 +261,7 @@ deriveShow fam =
        defineFunction $ DefineFun sh clauses
        defineFunction $
          DefineFun instn !(instClause sh instn info instArgs instConstrs)
-       addInstance `{Show} instn
+       addImplementation `{Show} instn
        pure ()
   where tcArgName : TyConArg -> TTName
         tcArgName (TyConParameter x) = name x

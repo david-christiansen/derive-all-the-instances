@@ -117,7 +117,7 @@ ctorClause fam eq info ctor =
                             checkArg
 
                             focus todo
-                            [next] <- apply `(Delay {t=LazyEval} {a=Bool}) [False]
+                            [next] <- apply `(Delay {t=LazyValue} {a=Bool}) [False]
                             solve
                             focus next
                             checkEq args
@@ -173,7 +173,7 @@ instClause : (eq, instn : TTName) ->
              (instArgs, instConstrs : List FunArg) ->
              Elab (List (FunClause Raw))
 instClause eq instn info instArgs instConstrs =
-  do let baseCtorN = SN (InstanceCtorN `{Interfaces.Eq})
+  do let baseCtorN = SN (ImplementationCtorN `{Interfaces.Eq})
      (ctorN, _, _) <- lookupTyExact baseCtorN
      clause <- elabPatternClause
                  (do apply (Var instn)
@@ -229,7 +229,8 @@ deriveEq fam =
      info <- getTyConInfo (tyConArgs datatype) (tyConRes datatype)
      decl <- declareEq fam eq info
      declareType decl
-     let instn = NS (SN $ InstanceN `{Interfaces.Eq} [show fam]) !currentNamespace
+     let instn = NS (SN $ ImplementationN `{Interfaces.Eq} [show fam])
+                    !currentNamespace
      instConstrs <- Foldable.concat <$>
                     traverse (\ param =>
                                 case param of
@@ -250,7 +251,7 @@ deriveEq fam =
      defineFunction $ DefineFun eq (clauses ++ [!(catchall eq info)])
      defineFunction $
        DefineFun instn !(instClause eq instn info instArgs instConstrs)
-     addInstance `{Interfaces.Eq} instn
+     addImplementation `{Interfaces.Eq} instn
      pure ()
 
   where tcArgName : TyConArg -> TTName
