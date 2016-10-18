@@ -23,18 +23,18 @@ declareEq fam eq info =
        constrs <- traverse
                      (\(n, t) =>
                         do n' <- gensym "constrarg"
-                           return $ MkFunArg n' `(Eq ~(Var n)) Constraint NotErased) $
+                           pure $ MkFunArg n' `(Eq ~(Var n)) Constraint NotErased) $
                      List.filter (isRType . snd) $
                      getParams info
        arg1 <- applyTyCon (args info) (Var fam)
        arg2 <- applyTyCon (args info) (Var fam)
-       return $ Declare eq (paramArgs ++ constrs ++ arg1 ++ arg2) `(Bool)
+       pure $ Declare eq (paramArgs ++ constrs ++ arg1 ++ arg2) `(Bool)
   where
     makeImplicit : FunArg -> FunArg
     makeImplicit arg = record {plicity = Implicit} arg
 
     applyTyCon : List TyConArg -> Raw -> Elab (List FunArg)
-    applyTyCon [] acc = return $ [MkFunArg !(gensym "arg") acc Explicit NotErased]
+    applyTyCon [] acc = pure $ [MkFunArg !(gensym "arg") acc Explicit NotErased]
     applyTyCon (TyConIndex arg :: args) acc =
         (\tl => makeImplicit arg :: tl) <$> applyTyCon args (RApp acc (Var (name arg)))
     applyTyCon (TyConParameter arg :: args) acc =
@@ -93,7 +93,7 @@ ctorClause fam eq info ctor =
 
 
   where mkArgHole : CtorArg -> Elab ()
-        mkArgHole (CtorParameter _) = return ()
+        mkArgHole (CtorParameter _) = pure ()
         mkArgHole (CtorField arg) = do claim (name arg) (type arg)
                                        unfocus (name arg)
 
@@ -183,14 +183,14 @@ instClause eq instn info instArgs instConstrs =
                      solve)
                  (do [a, b, c] <- apply (Var ctorN) [True, False, False]
                      solve
-                     focus b; callEq (return ())
+                     focus b; callEq (pure ())
                      focus c
                      callEq $ do [notArg] <- apply `(not) [True]
                                  solve
                                  focus notArg
                      -- the only holes left are the constraint dicts
                      traverse_ (\h => focus h *> resolveTC instn) !getHoles)
-     return [clause]
+     pure [clause]
 
    where
 
@@ -234,11 +234,11 @@ deriveEq fam =
                     traverse (\ param =>
                                 case param of
                                   (n, RType) => do constrn <- gensym "instarg"
-                                                   return [MkFunArg constrn
+                                                   pure [MkFunArg constrn
                                                                     `(Eq ~(Var n) : Type)
                                                                     Constraint
                                                                     NotErased]
-                                  _ => return [])
+                                  _ => pure [])
                              (getParams info)
      let instArgs = map tcFunArg (args info)
      let instRes = RApp (Var `{Interfaces.Eq})
@@ -251,7 +251,7 @@ deriveEq fam =
      defineFunction $
        DefineFun instn !(instClause eq instn info instArgs instConstrs)
      addInstance `{Interfaces.Eq} instn
-     return ()
+     pure ()
 
   where tcArgName : TyConArg -> TTName
         tcArgName (TyConParameter x) = name x

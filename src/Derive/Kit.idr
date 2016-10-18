@@ -18,11 +18,11 @@ skip = pure ()
 
 last : List a -> Elab a
 last [] = fail [TextPart "Unexpected empty list"]
-last [x] = return x
+last [x] = pure x
 last (_::x::xs) = last (x::xs)
 
 getSigmaArgs : Raw -> Elab (Raw, Raw)
-getSigmaArgs `(MkSigma {a=~_} {P=~_} ~rhsTy ~lhs) = return (rhsTy, lhs)
+getSigmaArgs `(MkSigma {a=~_} {P=~_} ~rhsTy ~lhs) = pure (rhsTy, lhs)
 getSigmaArgs arg = fail [TextPart "Not a sigma constructor"]
 
 
@@ -31,7 +31,7 @@ getSigmaArgs arg = fail [TextPart "Not a sigma constructor"]
 allSolved : List TTName -> Elab ()
 allSolved ns = allSolved' ns !getHoles
   where allSolved' : List TTName -> List TTName -> Elab ()
-        allSolved' [] hs = return ()
+        allSolved' [] hs = pure ()
         allSolved' (n::ns) hs =
           if elem n hs
             then debugMessage [TextPart "Not all holes were solved! Remaining: ",
@@ -40,13 +40,13 @@ allSolved ns = allSolved' ns !getHoles
             else allSolved' ns hs
 
 zipH : List a -> List b -> Elab (List (a, b))
-zipH [] [] = return []
+zipH [] [] = pure []
 zipH (x::xs) (y::ys) = ((x, y) ::) <$> zipH xs ys
 zipH _ _ = fail [TextPart "length mismatch"]
 
 assoc : Eq a => a -> List (a, b) -> Elab b
 assoc x [] = fail [ TextPart "not found" ]
-assoc x ((y, z)::ys) = if x == y then return z else assoc x ys
+assoc x ((y, z)::ys) = if x == y then pure z else assoc x ys
 
 doTimes : Applicative m => (n : Nat) -> m a -> m (Vect n a)
 doTimes Z x = pure []
@@ -58,7 +58,7 @@ isRType _ = False
 
 unsafeNth : Nat -> List a -> Elab a
 unsafeNth _     []        = fail [TextPart "Ran out of list elements"]
-unsafeNth Z     (x :: _)  = return x
+unsafeNth Z     (x :: _)  = pure x
 unsafeNth (S k) (_ :: xs) = unsafeNth k xs
 
 
@@ -74,7 +74,7 @@ argHoles (RBind n (Pi t _) body) = do n' <- nameFrom n
                                       claim n t
                                       unfocus n
                                       (n ::) <$> argHoles body
-argHoles _ = return []
+argHoles _ = pure []
 
 enumerate : List a -> List (Nat, a)
 enumerate xs = enumerate' xs 0
@@ -118,8 +118,8 @@ stealBindings : Raw -> (nsubst : TTName -> Maybe TTName) -> Elab (List (TTName, 
 stealBindings (RBind n b tm) nsubst =
   do n' <- nameFrom n
      (bindings, result) <- stealBindings tm (extend nsubst n n')
-     return ((n', map (alphaRaw nsubst) b) :: bindings, result)
-stealBindings tm nsubst = return ([], alphaRaw nsubst tm)
+     pure ((n', map (alphaRaw nsubst) b) :: bindings, result)
+stealBindings tm nsubst = pure ([], alphaRaw nsubst tm)
 
 ||| Grab the binders from around a term, assuming that they have been previously uniquified
 extractBinders : Raw -> (List (TTName, Binder Raw), Raw)
@@ -180,7 +180,7 @@ namespace Tactics
               case g of
                 Bind n (Pi _ _) _ => do n' <- nameFrom n
                                         intro n'
-                                        return n'
+                                        pure n'
                 _ => fail [ TextPart "Can't intro1 because goal"
                           , TermPart g
                           , TextPart "isn't a function type."]
@@ -192,7 +192,7 @@ namespace Tactics
           go (Bind n (Pi _ _) body) = do n' <- nameFrom n
                                          intro n'
                                          (n' ::) <$> go body
-          go _ = return []
+          go _ = pure []
 
 
 
