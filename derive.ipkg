@@ -7,3 +7,4 @@ package derive
 sourcedir = src
 modules = Derive.Kit, Derive.Eq, Derive.Show, Derive.ShowTests
 pkgs = contrib, pruviloj
+opts = "-X ElabReflection"
