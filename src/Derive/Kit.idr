@@ -193,7 +193,3 @@ namespace Tactics
                                          intro n'
                                          (n' ::) <$> go body
           go _ = pure []
-
-
-
-
