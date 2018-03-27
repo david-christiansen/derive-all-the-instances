@@ -55,7 +55,6 @@ strName (UN n) = case unpack n of
 strName (NS n _) = strName n
 strName (MN x y) = y
 strName (SN x) = "**SN**" -- won't happen with user-declared types
-strName NErased = "**Erased**" -- won't happen with user-declared types
 
 ||| Make the show clause for a single constructor
 ctorClause : (fam, sh : TTName) -> (info : TyConInfo) ->
