@@ -6,7 +6,7 @@ import Language.Reflection.Elab
 import Language.Reflection.Utils
 import Pruviloj.Internals.TyConInfo
 import Pruviloj.Internals
-import Pruviloj.Core
+import public Pruviloj.Core
 
 %access private
 
@@ -167,7 +167,7 @@ catchall eq info =
 ||| @ eq the name of the underlying == implementation
 ||| @ instn the name to be used for the dictionary object
 ||| @ info a description of the type constructors
-||| @ instArgs the arguments 
+||| @ instArgs the arguments
 instClause : (eq, instn : TTName) ->
              (info : TyConInfo) ->
              (instArgs, instConstrs : List FunArg) ->

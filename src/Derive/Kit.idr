@@ -22,7 +22,7 @@ last [x] = pure x
 last (_::x::xs) = last (x::xs)
 
 getSigmaArgs : Raw -> Elab (Raw, Raw)
-getSigmaArgs `(MkSigma {a=~_} {P=~_} ~rhsTy ~lhs) = pure (rhsTy, lhs)
+getSigmaArgs `(MkDPair {a=~_} {P=~_} ~rhsTy ~lhs) = pure (rhsTy, lhs)
 getSigmaArgs arg = fail [TextPart "Not a sigma constructor"]
 
 
@@ -193,7 +193,3 @@ namespace Tactics
                                          intro n'
                                          (n' ::) <$> go body
           go _ = pure []
-
-
-
-
